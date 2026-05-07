@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node 설치
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Rust 설치
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 의존성 설치
+        run: npm install
+
+      - name: Tauri 빌드 및 릴리즈
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Together ${{ github.ref_name }}'
+          releaseBody: '새 버전이 출시되었습니다.'
+          releaseDraft: false
+          prerelease: false
