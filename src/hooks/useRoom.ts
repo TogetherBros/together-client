@@ -43,7 +43,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
     charRef.current = pickRandom(ALL_CHARACTERS); // 랜덤 초기 배정
 
     const client = new Client({
-      brokerURL: 'ws://localhost:8080/ws',
+      brokerURL: 'ws://43.203.253.253:9090/ws',
       reconnectDelay: 3000,
       onConnect: () => {
         // ── 유저 목록 구독 ──────────────────────────────
@@ -151,6 +151,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
   };
 
   const sendActivity = (activity: string) => {
+    activityRef.current = activity; // 인터벌도 이 값을 전송하므로 함께 갱신
     const client = clientRef.current;
     if (!client?.connected || !config) return;
     client.publish({

@@ -67,6 +67,24 @@ fn is_lmb_down() -> bool {
 #[cfg(not(target_os = "windows"))]
 fn is_lmb_down() -> bool { false }
 
+// ── System cursor (Windows) ───────────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+fn set_system_cursor(cursor_id: usize) {
+    use winapi::um::winuser::{LoadCursorW, SetCursor};
+    unsafe {
+        let cur = LoadCursorW(std::ptr::null_mut(), cursor_id as *const u16);
+        if !cur.is_null() { SetCursor(cur); }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_system_cursor(_: usize) {}
+
+const IDC_ARROW:   usize = 32512;
+const IDC_HAND:    usize = 32649; // 손 커서 (호버)
+const IDC_SIZEALL: usize = 32646; // 이동 커서 (드래그 중)
+
 // ── Drag monitor ──────────────────────────────────────────────────────────────
 // 오버레이는 항상 passthrough (set_ignore_cursor_events 토글 없음 → 글리치 없음).
 // Rust 가 OS 레벨에서 마우스 버튼+위치를 폴링해 드래그를 감지하고
@@ -80,19 +98,28 @@ fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
         EndDrag(String),
     }
 
+    let mut cursor_set = false;
+
     loop {
         thread::sleep(Duration::from_millis(16)); // ~60 fps
 
         let Some(overlay) = app.get_webview_window("overlay") else { continue };
-        if !overlay.is_visible().unwrap_or(false) { continue; }
+        if !overlay.is_visible().unwrap_or(false) {
+            if cursor_set { set_system_cursor(IDC_ARROW); cursor_set = false; }
+            continue;
+        }
 
         let (cx, cy) = get_cursor_pos();
         let lmb = is_lmb_down();
 
-        let action = {
+        let (action, in_zone, is_dragging_now) = {
             let mut s = state.lock().unwrap();
 
-            if !s.is_dragging && lmb {
+            let in_zone = s.character_zones.iter().any(|z| {
+                cx >= z[0] && cx < z[0] + z[2] && cy >= z[1] && cy < z[1] + z[3]
+            });
+
+            let action = if !s.is_dragging && lmb {
                 let idx = s.character_zones.iter().position(|z| {
                     cx >= z[0] && cx < z[0] + z[2] && cy >= z[1] && cy < z[1] + z[3]
                 });
@@ -123,8 +150,22 @@ fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
                 }
             } else {
                 Action::None
-            }
+            };
+
+            (action, in_zone, s.is_dragging)
         };
+
+        // 커서 변경: 드래그 중 → 이동, 존 위 → 손, 그 외 → 복원
+        if is_dragging_now {
+            set_system_cursor(IDC_SIZEALL);
+            cursor_set = true;
+        } else if in_zone {
+            set_system_cursor(IDC_HAND);
+            cursor_set = true;
+        } else if cursor_set {
+            set_system_cursor(IDC_ARROW);
+            cursor_set = false;
+        }
 
         match action {
             Action::StartDrag(uid) => { let _ = overlay.emit("drag-start", uid); }

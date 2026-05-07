@@ -48,7 +48,6 @@ export default function ChatScreen({
 }: Props) {
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
-  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const elapsed = useElapsed(config.joinedAt);
   const win = getCurrentWindow();
 
@@ -59,26 +58,15 @@ export default function ChatScreen({
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const text = e.target.value;
     setInput(text);
-
-    if (text.trim()) {
-      onSendActivity('입력 중...');
-      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-      // 2초 동안 추가 입력이 없으면 타이핑 표시 해제 (다음 3초 주기가 덮어씀)
-      typingTimerRef.current = setTimeout(() => {
-        typingTimerRef.current = null;
-      }, 2000);
-    }
+    onSendActivity(text.trim() ? '입력 중...' : '');
   };
 
   const handleSend = () => {
     const text = input.trim();
     if (!text) return;
+    onSendActivity('');
     onSendChat(text);
     setInput('');
-    if (typingTimerRef.current) {
-      clearTimeout(typingTimerRef.current);
-      typingTimerRef.current = null;
-    }
   };
 
   return (

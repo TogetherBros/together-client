@@ -11,7 +11,8 @@ interface Props {
 export default function CharacterCard({ user, index, position, bubbleMessage }: Props) {
   const { x, y } = position;
 
-  const isTyping = user.activity === '입력 중...';
+  // bubbleMessage(채팅)가 있으면 타이핑 점 대신 채팅 내용 우선 표시
+  const isTyping = !bubbleMessage && user.activity === '입력 중...';
   const displayText = bubbleMessage ?? user.activity;
   const showBubble = !!bubbleMessage || user.activity !== '';
 

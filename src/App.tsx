@@ -50,6 +50,7 @@ function App() {
   useEffect(() => {
     if (!config) return;
     const poll = async () => {
+      if (activityRef.current === '입력 중...') return; // 타이핑 중엔 덮어쓰지 않음
       try {
         const app = await invoke<string>('get_active_app');
         activityRef.current = app;
