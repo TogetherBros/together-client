@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "character-overlay",
+  "description": "Capability for per-character overlay windows",
+  "windows": ["char_*"],
+  "permissions": [
+    "core:default"
+  ]
+}
