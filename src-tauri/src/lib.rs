@@ -1,4 +1,31 @@
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 use tauri::{Emitter, Manager};
+
+// ── Shared state ──────────────────────────────────────────────────────────────
+
+struct OverlayState {
+    character_zones: Vec<[i32; 4]>,
+    user_ids: Vec<String>,
+    is_dragging: bool,
+    drag_user_idx: usize,
+    last_drag_pos: (i32, i32),
+}
+
+impl Default for OverlayState {
+    fn default() -> Self {
+        Self {
+            character_zones: Vec::new(),
+            user_ids: Vec::new(),
+            is_dragging: false,
+            drag_user_idx: 0,
+            last_drag_pos: (0, 0),
+        }
+    }
+}
+
+type SharedState = Arc<Mutex<OverlayState>>;
 
 // ── Window helpers ────────────────────────────────────────────────────────────
 
@@ -13,23 +40,146 @@ fn restore_window(app: &tauri::AppHandle) {
     }
 }
 
+// ── Cursor position (Windows) ─────────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+fn get_cursor_pos() -> (i32, i32) {
+    use winapi::shared::windef::POINT;
+    use winapi::um::winuser::GetCursorPos;
+    unsafe {
+        let mut pt = POINT { x: 0, y: 0 };
+        GetCursorPos(&mut pt);
+        (pt.x, pt.y)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_cursor_pos() -> (i32, i32) { (0, 0) }
+
+// ── Left mouse button state (Windows) ────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+fn is_lmb_down() -> bool {
+    use winapi::um::winuser::GetAsyncKeyState;
+    unsafe { (GetAsyncKeyState(0x01) as u16 & 0x8000) != 0 }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_lmb_down() -> bool { false }
+
+// ── Drag monitor ──────────────────────────────────────────────────────────────
+// 오버레이는 항상 passthrough (set_ignore_cursor_events 토글 없음 → 글리치 없음).
+// Rust 가 OS 레벨에서 마우스 버튼+위치를 폴링해 드래그를 감지하고
+// 물리 픽셀 델타를 drag-move 이벤트로 오버레이 JS 에 전달.
+
+fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
+    enum Action {
+        None,
+        StartDrag(String),
+        MoveDrag(String, i32, i32),
+        EndDrag(String),
+    }
+
+    loop {
+        thread::sleep(Duration::from_millis(16)); // ~60 fps
+
+        let Some(overlay) = app.get_webview_window("overlay") else { continue };
+        if !overlay.is_visible().unwrap_or(false) { continue; }
+
+        let (cx, cy) = get_cursor_pos();
+        let lmb = is_lmb_down();
+
+        let action = {
+            let mut s = state.lock().unwrap();
+
+            if !s.is_dragging && lmb {
+                let idx = s.character_zones.iter().position(|z| {
+                    cx >= z[0] && cx < z[0] + z[2] && cy >= z[1] && cy < z[1] + z[3]
+                });
+                if let Some(i) = idx {
+                    let uid = s.user_ids.get(i).cloned().unwrap_or_default();
+                    s.is_dragging = true;
+                    s.drag_user_idx = i;
+                    s.last_drag_pos = (cx, cy);
+                    Action::StartDrag(uid)
+                } else {
+                    Action::None
+                }
+            } else if s.is_dragging {
+                if lmb {
+                    let dx = cx - s.last_drag_pos.0;
+                    let dy = cy - s.last_drag_pos.1;
+                    if dx != 0 || dy != 0 {
+                        let uid = s.user_ids.get(s.drag_user_idx).cloned().unwrap_or_default();
+                        s.last_drag_pos = (cx, cy);
+                        Action::MoveDrag(uid, dx, dy)
+                    } else {
+                        Action::None
+                    }
+                } else {
+                    let uid = s.user_ids.get(s.drag_user_idx).cloned().unwrap_or_default();
+                    s.is_dragging = false;
+                    Action::EndDrag(uid)
+                }
+            } else {
+                Action::None
+            }
+        };
+
+        match action {
+            Action::StartDrag(uid) => { let _ = overlay.emit("drag-start", uid); }
+            Action::MoveDrag(uid, dx, dy) => { let _ = overlay.emit("drag-move", (uid, dx, dy)); }
+            Action::EndDrag(uid) => { let _ = overlay.emit("drag-end", uid); }
+            Action::None => {}
+        }
+    }
+}
+
 // ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
-fn enter_overlay(app: tauri::AppHandle) -> Result<(), String> {
+fn enter_overlay(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
     if let Some(w) = app.get_webview_window("overlay") {
         let _ = w.set_ignore_cursor_events(true);
         let _ = w.show();
     }
+    let mut s = state.lock().unwrap();
+    s.character_zones.clear();
+    s.user_ids.clear();
+    s.is_dragging = false;
     Ok(())
 }
 
 #[tauri::command]
-fn leave_overlay(app: tauri::AppHandle) -> Result<(), String> {
+fn leave_overlay(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SharedState>,
+) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("overlay") { let _ = w.hide(); }
     restore_window(&app);
+    let mut s = state.lock().unwrap();
+    s.character_zones.clear();
+    s.user_ids.clear();
+    s.is_dragging = false;
     Ok(())
+}
+
+#[tauri::command]
+fn update_character_zones(
+    zones: Vec<Vec<i32>>,
+    user_ids: Vec<String>,
+    state: tauri::State<'_, SharedState>,
+) {
+    let mut s = state.lock().unwrap();
+    s.character_zones = zones
+        .into_iter()
+        .filter_map(|z| if z.len() == 4 { Some([z[0], z[1], z[2], z[3]]) } else { None })
+        .collect();
+    s.user_ids = user_ids;
 }
 
 #[tauri::command]
@@ -128,12 +278,18 @@ fn capitalize_first(s: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let shared_state: SharedState = Arc::new(Mutex::new(OverlayState::default()));
+
     tauri::Builder::default()
-        .setup(|app| {
+        .manage(shared_state.clone())
+        .setup(move |app| {
             use tauri::menu::{Menu, MenuItem};
             use tauri::tray::TrayIconBuilder;
 
-            // overlay 창 — hidden 상태로 미리 생성, 항상 passthrough 유지
+            let app_handle = app.handle().clone();
+            let state_for_thread = shared_state.clone();
+            thread::spawn(move || drag_monitor(app_handle, state_for_thread));
+
             tauri::WebviewWindowBuilder::new(
                 app,
                 "overlay",
@@ -150,7 +306,6 @@ pub fn run() {
             .visible(false)
             .build()?;
 
-            // main 창 닫기 → 숨기기
             let app_handle2 = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
                 window.on_window_event(move |event| {
@@ -197,6 +352,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             enter_overlay,
             leave_overlay,
+            update_character_zones,
             get_active_app,
         ])
         .run(tauri::generate_context!())

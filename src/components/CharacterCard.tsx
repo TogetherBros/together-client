@@ -1,16 +1,15 @@
 import { UserState } from '../types';
 import { characterImages } from '../characters';
-import { getCharacterPosition } from '../utils/position';
 
 interface Props {
   user: UserState;
   index: number;
-  total: number;
+  position: { x: number; y: number };
   bubbleMessage?: string;
 }
 
-export default function CharacterCard({ user, index, total, bubbleMessage }: Props) {
-  const { x, y } = getCharacterPosition(index, total);
+export default function CharacterCard({ user, index, position, bubbleMessage }: Props) {
+  const { x, y } = position;
 
   const isTyping = user.activity === '입력 중...';
   const displayText = bubbleMessage ?? user.activity;
