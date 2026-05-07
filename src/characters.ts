@@ -4,7 +4,7 @@ import dogImg from '../image/together_dog.png';
 import catImg from '../image/together_cat.png';
 import bunnyImg from '../image/together_bunny.png';
 import bearImg from '../image/together_bear.png';
-import birdImg from '../image/togegher_bird.png';
+import birdImg from '../image/together_bird.png';
 import beeImg from '../image/together_bee.png';
 import logoImg from '../image/together_logo.png';
 

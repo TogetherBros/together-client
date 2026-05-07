@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "together-fe",
+  "productName": "Together",
   "version": "0.1.0",
   "identifier": "com.n5rud.together-fe",
   "build": {
@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' tauri: asset: https://asset.localhost; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' blob:; connect-src 'self' ws://43.203.253.253:9090 ipc: http://ipc.localhost; img-src 'self' asset: https://asset.localhost blob: data:"
     }
   },
   "bundle": {
