@@ -347,6 +347,11 @@ pub fn run() {
             .visible(false)
             .build()?;
 
+            #[cfg(debug_assertions)]
+            if let Some(w) = app.get_webview_window("main") {
+                w.open_devtools();
+            }
+
             let app_handle2 = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
                 window.on_window_event(move |event| {

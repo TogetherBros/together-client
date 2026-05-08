@@ -42,10 +42,22 @@ export function useRoom(config: RoomConfig | null): RoomState {
     const { roomCode, deviceId, nickname } = config;
     charRef.current = pickRandom(ALL_CHARACTERS); // 랜덤 초기 배정
 
+    let errorTimer: ReturnType<typeof setTimeout> | null = null;
+
     const client = new Client({
       brokerURL: 'wss://api.togetherbros.uk/ws',
       reconnectDelay: 3000,
+      onWebSocketError: () => {
+        if (errorTimer) return;
+        errorTimer = setTimeout(() => {
+          setError('서버에 연결할 수 없습니다. 네트워크를 확인하세요.');
+        }, 6000);
+      },
+      onStompError: (frame) => {
+        setError(frame.headers?.message || 'STOMP 연결 오류');
+      },
       onConnect: () => {
+        if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
         // ── 유저 목록 구독 ──────────────────────────────
         client.subscribe(`/topic/room/${roomCode}`, (msg) => {
           const received: UserState[] = JSON.parse(msg.body);
@@ -121,6 +133,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
     clientRef.current = client;
 
     return () => {
+      if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
