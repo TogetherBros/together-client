@@ -43,7 +43,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
     charRef.current = pickRandom(ALL_CHARACTERS); // 랜덤 초기 배정
 
     const client = new Client({
-      brokerURL: 'ws://43.203.253.253:9090/ws',
+      brokerURL: 'wss://api.togetherbros.uk/ws',
       reconnectDelay: 3000,
       onConnect: () => {
         // ── 유저 목록 구독 ──────────────────────────────
