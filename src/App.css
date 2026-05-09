@@ -6,18 +6,18 @@
 }
 
 :root {
-  --bg: #08080f;
-  --surface: rgba(255, 255, 255, 0.04);
-  --surface-hover: rgba(255, 255, 255, 0.07);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-focus: rgba(160, 120, 255, 0.5);
-  --accent: #8b5cf6;
-  --accent-glow: rgba(139, 92, 246, 0.35);
-  --accent-light: #c4b5fd;
-  --text: #f0eeff;
-  --text-muted: rgba(240, 238, 255, 0.45);
-  --red: #f87171;
-  --red-surface: rgba(248, 113, 113, 0.15);
+  --bg: #f2f0ff;
+  --surface: #ffffff;
+  --surface-hover: #ece8ff;
+  --border: rgba(109, 40, 217, 0.12);
+  --border-focus: rgba(109, 40, 217, 0.45);
+  --accent: #7c3aed;
+  --accent-glow: rgba(124, 58, 237, 0.15);
+  --accent-light: #5b21b6;
+  --text: #18103a;
+  --text-muted: rgba(24, 16, 58, 0.48);
+  --red: #dc2626;
+  --red-surface: rgba(220, 38, 38, 0.08);
 }
 
 html, body, #root {
@@ -63,9 +63,7 @@ input {
   gap: 16px;
   width: 100%;
   height: 100%;
-  background:
-    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(100, 60, 200, 0.25) 0%, transparent 70%),
-    var(--bg);
+  background: var(--bg);
   animation: splashFadeIn 0.7s ease forwards;
 }
 
@@ -73,7 +71,7 @@ input {
   width: 72px;
   height: 72px;
   object-fit: contain;
-  filter: drop-shadow(0 0 24px var(--accent-glow));
+  filter: drop-shadow(0 0 20px var(--accent-glow));
   animation: splashPop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
@@ -81,10 +79,7 @@ input {
   font-size: 28px;
   font-weight: 800;
   letter-spacing: -0.5px;
-  background: linear-gradient(130deg, #c4b5fd 0%, #818cf8 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--accent);
   opacity: 0;
   animation: splashTitleIn 0.5s ease 0.35s forwards;
 }
@@ -140,17 +135,17 @@ input {
   height: 12px;
   border-radius: 50%;
   border: none;
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.12);
   transition: background 0.15s;
   padding: 0;
 }
 
 .titlebar-btn:hover {
-  background: rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, 0.22);
 }
 
 .titlebar-minimize:hover { background: #f5c543; }
-.titlebar-close:hover    { background: #f87171; }
+.titlebar-close:hover    { background: #ef4444; }
 
 .lobby {
   position: relative;
@@ -159,10 +154,8 @@ input {
   justify-content: center;
   width: 100%;
   height: 100%;
-  background:
-    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(100, 60, 200, 0.25) 0%, transparent 70%),
-    var(--bg);
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.8);
+  background: var(--bg);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.12);
 }
 
 .lobby-card {
@@ -171,10 +164,7 @@ input {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 20px;
-  backdrop-filter: blur(24px);
-  box-shadow:
-    0 0 0 1px rgba(100, 60, 200, 0.08),
-    0 32px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 4px 32px rgba(109, 40, 217, 0.08);
 }
 
 /* Header */
@@ -188,17 +178,14 @@ input {
   height: 60px;
   object-fit: contain;
   margin-bottom: 10px;
-  filter: drop-shadow(0 0 16px var(--accent-glow));
+  filter: drop-shadow(0 0 12px var(--accent-glow));
 }
 
 .lobby-title {
   font-size: 26px;
   font-weight: 800;
   letter-spacing: -0.5px;
-  background: linear-gradient(130deg, #c4b5fd 0%, #818cf8 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--accent);
 }
 
 .lobby-subtitle {
@@ -226,7 +213,7 @@ input {
 .form-input {
   width: 100%;
   padding: 11px 14px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--text);
@@ -237,11 +224,11 @@ input {
 
 .form-input:focus {
   border-color: var(--border-focus);
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
 }
 
 .form-input::placeholder {
-  color: rgba(255, 255, 255, 0.18);
+  color: rgba(24, 16, 58, 0.28);
 }
 
 /* Character grid */
@@ -266,15 +253,15 @@ input {
 
 .character-btn:hover {
   background: var(--surface-hover);
-  border-color: rgba(139, 92, 246, 0.25);
+  border-color: rgba(124, 58, 237, 0.3);
   color: var(--text);
 }
 
 .character-btn.selected {
-  background: rgba(139, 92, 246, 0.12);
+  background: rgba(124, 58, 237, 0.08);
   border-color: var(--accent);
   color: var(--accent-light);
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
 }
 
 .char-select-img {
@@ -309,10 +296,10 @@ input {
 
 .generate-btn {
   padding: 11px 14px;
-  background: rgba(139, 92, 246, 0.1);
-  border: 1px solid rgba(139, 92, 246, 0.25);
+  background: rgba(124, 58, 237, 0.07);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  color: var(--accent-light);
+  color: var(--accent);
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
@@ -320,8 +307,8 @@ input {
 }
 
 .generate-btn:hover {
-  background: rgba(139, 92, 246, 0.2);
-  border-color: rgba(139, 92, 246, 0.4);
+  background: rgba(124, 58, 237, 0.14);
+  border-color: rgba(124, 58, 237, 0.3);
 }
 
 /* Join button */
@@ -329,19 +316,19 @@ input {
   width: 100%;
   padding: 13px;
   margin-top: 6px;
-  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  background: var(--accent);
   border-radius: 12px;
   color: #fff;
   font-size: 15px;
   font-weight: 800;
   letter-spacing: 0.03em;
-  transition: all 0.2s;
+  transition: all 0.18s;
 }
 
 .join-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  background: #6d28d9;
   transform: translateY(-1px);
-  box-shadow: 0 8px 24px var(--accent-glow);
+  box-shadow: 0 6px 20px var(--accent-glow);
 }
 
 .join-btn:active:not(:disabled) {
@@ -351,6 +338,67 @@ input {
 .join-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+/* ══════════════════════════════════════
+   UPDATE BANNER
+══════════════════════════════════════ */
+.update-banner {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(124, 58, 237, 0.18);
+  z-index: 9999;
+  white-space: nowrap;
+}
+
+.update-banner-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.update-banner-btn {
+  padding: 5px 14px;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.update-banner-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.update-banner-btn:not(:disabled):hover {
+  opacity: 0.85;
+}
+
+.update-banner-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.update-banner-dismiss:hover {
+  color: var(--text);
 }
 
 /* ══════════════════════════════════════
@@ -387,7 +435,6 @@ input {
    CHARACTER CARD
 ══════════════════════════════════════ */
 
-/* Outer wrapper: GPU composite layer for position — immune to viewport layout recalc */
 .character-pos {
   position: absolute;
   left: 0;
@@ -396,7 +443,6 @@ input {
   user-select: none;
 }
 
-/* Inner card: float animation only */
 .character-card {
   display: flex;
   flex-direction: column;
@@ -414,7 +460,6 @@ input {
   50%        { transform: translateY(-10px); }
 }
 
-/* 말풍선 기본 — absolute 로 float 흐름에서 제거, 캐릭터 위치 불변 */
 .speech-bubble {
   position: absolute;
   bottom: calc(100% + 6px);
@@ -439,10 +484,9 @@ input {
   max-width: 140px;
 }
 
-/* 채팅 말풍선 (보라 테두리) */
 .speech-bubble-chat {
-  background: rgba(139, 92, 246, 0.92);
-  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4);
+  background: rgba(124, 58, 237, 0.92);
+  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.4);
 }
 
 .speech-bubble-chat span {
@@ -450,7 +494,7 @@ input {
 }
 
 .speech-bubble-chat::after {
-  border-top-color: rgba(139, 92, 246, 0.92) !important;
+  border-top-color: rgba(124, 58, 237, 0.92) !important;
 }
 
 .speech-bubble::after {
@@ -464,7 +508,6 @@ input {
   border-top: 8px solid rgba(255, 255, 255, 0.97);
 }
 
-/* 타이핑 인디케이터 */
 .typing-dots {
   display: inline-flex;
   flex-direction: row;
@@ -514,7 +557,6 @@ input {
   backdrop-filter: blur(8px);
 }
 
-/* "나" 배지 */
 .me-badge {
   background: var(--accent);
   color: #fff;
@@ -557,7 +599,7 @@ input {
 
 .char-overlay-me .char-overlay-img {
   filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.45))
-          drop-shadow(0 0 14px rgba(139, 92, 246, 0.9));
+          drop-shadow(0 0 14px rgba(124, 58, 237, 0.9));
 }
 
 /* ══════════════════════════════════════
@@ -576,15 +618,25 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  background: var(--surface);
+  -webkit-app-region: drag;
+  app-region: drag;
 }
 
 .chat-header-left {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.chat-header-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 2px;
 }
 
 .chat-room-label {
@@ -609,10 +661,19 @@ input {
   padding-left: 4px;
 }
 
+/* 나가기 버튼 영역 */
+.chat-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
 .chat-leave-btn {
   padding: 6px 14px;
   background: var(--red-surface);
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  border: 1px solid rgba(220, 38, 38, 0.2);
   border-radius: 8px;
   color: var(--red);
   font-size: 12px;
@@ -622,12 +683,58 @@ input {
 }
 
 .chat-leave-btn:hover {
-  background: rgba(248, 113, 113, 0.25);
+  background: rgba(220, 38, 38, 0.15);
+}
+
+/* 인라인 확인 UI */
+.chat-leave-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-leave-confirm-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--red);
+}
+
+.chat-leave-confirm-yes {
+  padding: 5px 12px;
+  background: var(--red);
+  border: none;
+  border-radius: 7px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.chat-leave-confirm-yes:hover {
+  opacity: 0.85;
+}
+
+.chat-leave-confirm-no {
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.chat-leave-confirm-no:hover {
+  background: var(--surface-hover);
 }
 
 .chat-users {
   padding: 10px 20px;
   border-bottom: 1px solid var(--border);
+  background: var(--surface);
   flex-shrink: 0;
 }
 
@@ -669,14 +776,14 @@ input {
 
 .chat-user-chip-me {
   border-color: var(--accent);
-  background: rgba(139, 92, 246, 0.12);
+  background: rgba(124, 58, 237, 0.07);
 }
 
 .chat-me-tag {
   font-size: 10px;
   font-weight: 800;
   color: var(--accent-light);
-  background: rgba(139, 92, 246, 0.2);
+  background: rgba(124, 58, 237, 0.12);
   padding: 1px 5px;
   border-radius: 100px;
 }
@@ -772,13 +879,14 @@ input {
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
+  background: var(--surface);
   flex-shrink: 0;
 }
 
 .chat-input {
   flex: 1;
   padding: 10px 14px;
-  background: var(--surface);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--text);

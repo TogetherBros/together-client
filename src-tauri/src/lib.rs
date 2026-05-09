@@ -67,28 +67,41 @@ fn is_lmb_down() -> bool {
 #[cfg(not(target_os = "windows"))]
 fn is_lmb_down() -> bool { false }
 
-// ── System cursor (Windows) ───────────────────────────────────────────────────
+
+// ── System cursor replacement (Windows) ──────────────────────────────────────
+// passthrough 토글 없이 시스템 전체 화살표 커서를 손 모양으로 교체.
+// SetSystemCursor는 커서 핸들 소유권을 가져가므로 반드시 CopyIcon으로 복사본 전달.
+// 드래그 종료 시 SPI_SETCURSORS로 레지스트리 기본값으로 복원.
 
 #[cfg(target_os = "windows")]
-fn set_system_cursor(cursor_id: usize) {
-    use winapi::um::winuser::{LoadCursorW, SetCursor};
+fn set_drag_cursor() {
+    use winapi::um::winuser::{CopyIcon, LoadCursorW, SetSystemCursor};
+    const IDC_HAND:   usize = 32649;
+    const OCR_NORMAL: u32   = 32512;
     unsafe {
-        let cur = LoadCursorW(std::ptr::null_mut(), cursor_id as *const u16);
-        if !cur.is_null() { SetCursor(cur); }
+        let hand = LoadCursorW(std::ptr::null_mut(), IDC_HAND as *const u16);
+        if hand.is_null() { return; }
+        let copy = CopyIcon(hand as _) as winapi::shared::windef::HCURSOR;
+        if !copy.is_null() { SetSystemCursor(copy, OCR_NORMAL); }
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn set_system_cursor(_: usize) {}
+fn set_drag_cursor() {}
 
-const IDC_ARROW:   usize = 32512;
-const IDC_HAND:    usize = 32649; // 손 커서 (호버)
-const IDC_SIZEALL: usize = 32646; // 이동 커서 (드래그 중)
+#[cfg(target_os = "windows")]
+fn restore_drag_cursor() {
+    use winapi::um::winuser::SystemParametersInfoW;
+    const SPI_SETCURSORS: u32 = 0x0057;
+    unsafe { SystemParametersInfoW(SPI_SETCURSORS, 0, std::ptr::null_mut(), 0); }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn restore_drag_cursor() {}
 
 // ── Drag monitor ──────────────────────────────────────────────────────────────
-// 오버레이는 항상 passthrough (set_ignore_cursor_events 토글 없음 → 글리치 없음).
-// Rust 가 OS 레벨에서 마우스 버튼+위치를 폴링해 드래그를 감지하고
-// 물리 픽셀 델타를 drag-move 이벤트로 오버레이 JS 에 전달.
+// 오버레이는 항상 passthrough. Rust가 OS 레벨에서 마우스 버튼+위치를 폴링해
+// 드래그를 감지하고 물리 픽셀 델타를 drag-move 이벤트로 오버레이 JS에 전달.
 
 fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
     enum Action {
@@ -98,16 +111,11 @@ fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
         EndDrag(String),
     }
 
-    let mut cursor_set = false;
-
     loop {
         thread::sleep(Duration::from_millis(16)); // ~60 fps
 
         let Some(overlay) = app.get_webview_window("overlay") else { continue };
-        if !overlay.is_visible().unwrap_or(false) {
-            if cursor_set { set_system_cursor(IDC_ARROW); cursor_set = false; }
-            continue;
-        }
+        if !overlay.is_visible().unwrap_or(false) { continue; }
 
         let (cx, cy) = get_cursor_pos();
         let lmb = is_lmb_down();
@@ -155,28 +163,33 @@ fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
             (action, in_zone, s.is_dragging)
         };
 
-        // 커서 변경: 드래그 중 → 이동, 존 위 → 손, 그 외 → 복원
-        if is_dragging_now {
-            set_system_cursor(IDC_SIZEALL);
-            cursor_set = true;
-        } else if in_zone {
-            set_system_cursor(IDC_HAND);
-            cursor_set = true;
-        } else if cursor_set {
-            set_system_cursor(IDC_ARROW);
-            cursor_set = false;
-        }
 
         match action {
-            Action::StartDrag(uid) => { let _ = overlay.emit("drag-start", uid); }
+            Action::StartDrag(uid) => {
+                set_drag_cursor();
+                let _ = overlay.emit("drag-start", uid);
+            }
             Action::MoveDrag(uid, dx, dy) => { let _ = overlay.emit("drag-move", (uid, dx, dy)); }
-            Action::EndDrag(uid) => { let _ = overlay.emit("drag-end", uid); }
+            Action::EndDrag(uid) => {
+                restore_drag_cursor();
+                let _ = overlay.emit("drag-end", uid);
+            }
             Action::None => {}
         }
     }
 }
 
 // ── Tauri commands ────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn show_main_window(app: tauri::AppHandle) {
+    restore_window(&app);
+}
+
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
 
 #[tauri::command]
 fn enter_overlay(
@@ -364,25 +377,26 @@ pub fn run() {
                 });
             }
 
-            let show  = MenuItem::with_id(app, "show",  "열기",     true, None::<&str>)?;
-            let leave = MenuItem::with_id(app, "leave", "방 나가기", true, None::<&str>)?;
-            let quit  = MenuItem::with_id(app, "quit",  "종료",      true, None::<&str>)?;
-            let menu  = Menu::with_items(app, &[&show, &leave, &quit])?;
+            use tauri::menu::PredefinedMenuItem;
+
+            let show  = MenuItem::with_id(app, "show",  "채팅창 키기", true, None::<&str>)?;
+            let leave = MenuItem::with_id(app, "leave", "방 나가기",   true, None::<&str>)?;
+            let sep   = PredefinedMenuItem::separator(app)?;
+            let quit  = MenuItem::with_id(app, "quit",  "종료하기",    true, None::<&str>)?;
+            let menu  = Menu::with_items(app, &[&show, &leave, &sep, &quit])?;
 
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
+                .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
-                        if let Some(w) = app.get_webview_window("overlay") { let _ = w.hide(); }
-                        restore_window(app);
                         if let Some(w) = app.get_webview_window("main") {
                             let _ = w.emit("open-chat", ());
                         }
                     }
                     "leave" => {
                         if let Some(w) = app.get_webview_window("overlay") { let _ = w.hide(); }
-                        restore_window(app);
                         if let Some(w) = app.get_webview_window("main") {
                             let _ = w.emit("leave-overlay", ());
                         }
@@ -394,8 +408,11 @@ pub fn run() {
 
             Ok(())
         })
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            show_main_window,
+            quit_app,
             enter_overlay,
             leave_overlay,
             update_character_zones,

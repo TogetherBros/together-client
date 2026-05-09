@@ -88,7 +88,8 @@ export function useRoom(config: RoomConfig | null): RoomState {
         // ── 채팅 구독 ───────────────────────────────────
         client.subscribe(`/topic/room/${roomCode}/chat`, (msg) => {
           const chatMsg: ChatMessage = JSON.parse(msg.body);
-          setMessages(prev => [...prev, chatMsg]);
+          const localMsg: ChatMessage = { ...chatMsg, sentAt: new Date().toISOString() };
+          setMessages(prev => [...prev, localMsg]);
 
           // 3.5초 동안 캐릭터 머리 위 말풍선 표시
           setBubbleMessages(prev => ({ ...prev, [chatMsg.userId]: chatMsg.message }));

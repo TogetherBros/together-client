@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke } from '@tauri-apps/api/core';
 import { RoomConfig } from '../types';
 import { logoImg } from '../characters';
 
@@ -14,13 +15,15 @@ function TitlebarButtons() {
     <div className="titlebar-buttons">
       <button
         className="titlebar-btn titlebar-minimize"
-        onClick={() => win.minimize()}
-        aria-label="최소화"
+        onClick={() => win.hide()}
+        title="창 닫기"
+        aria-label="창 닫기"
       />
       <button
         className="titlebar-btn titlebar-close"
-        onClick={() => win.hide()}
-        aria-label="닫기"
+        onClick={() => invoke('quit_app').catch(console.error)}
+        title="서비스 종료"
+        aria-label="서비스 종료"
       />
     </div>
   );

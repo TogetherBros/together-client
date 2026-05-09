@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke } from '@tauri-apps/api/core';
 import { UserState, ChatMessage, RoomConfig } from '../types';
 import { characterImages } from '../characters';
 
@@ -47,9 +47,9 @@ export default function ChatScreen({
   onBackToOverlay,
 }: Props) {
   const [input, setInput] = useState('');
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const elapsed = useElapsed(config.joinedAt);
-  const win = getCurrentWindow();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -71,29 +71,39 @@ export default function ChatScreen({
 
   return (
     <div className="chat-screen">
-      <div className="titlebar" data-tauri-drag-region>
-        <div className="titlebar-buttons">
-          <button
-            className="titlebar-btn titlebar-minimize"
-            onClick={() => win.minimize()}
-            aria-label="최소화"
-          />
-          <button
-            className="titlebar-btn titlebar-close"
-            onClick={onBackToOverlay}
-            aria-label="오버레이로"
-            title="오버레이로 돌아가기"
-          />
-        </div>
-      </div>
-
-      <div className="chat-header">
+      <div className="chat-header" data-tauri-drag-region>
         <div className="chat-header-left">
+          <div className="titlebar-buttons">
+            <button
+              className="titlebar-btn titlebar-minimize"
+              onClick={onBackToOverlay}
+              title="창 닫기"
+              aria-label="창 닫기"
+            />
+            <button
+              className="titlebar-btn titlebar-close"
+              onClick={() => invoke('quit_app').catch(console.error)}
+              title="서비스 종료"
+              aria-label="서비스 종료"
+            />
+          </div>
+          <div className="chat-header-divider" />
           <span className="chat-room-label">방</span>
           <span className="chat-room-code">{config.roomCode}</span>
           <span className="chat-elapsed">{formatElapsed(elapsed)}</span>
         </div>
-        <button className="chat-leave-btn" onClick={onLeave}>방 나가기</button>
+
+        <div className="chat-header-right">
+          {confirmLeave ? (
+            <div className="chat-leave-confirm">
+              <span className="chat-leave-confirm-text">나가시겠어요?</span>
+              <button className="chat-leave-confirm-yes" onClick={onLeave}>나가기</button>
+              <button className="chat-leave-confirm-no" onClick={() => setConfirmLeave(false)}>취소</button>
+            </div>
+          ) : (
+            <button className="chat-leave-btn" onClick={() => setConfirmLeave(true)}>방 나가기</button>
+          )}
+        </div>
       </div>
 
       <div className="chat-users">
