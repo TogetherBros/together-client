@@ -63,16 +63,19 @@ fn get_cursor_pos() -> (i32, i32) {
     extern "C" {
         fn CGMainDisplayID() -> u32;
         fn CGDisplayBounds(display: u32) -> CGRect;
-        fn CGDisplayScaleFactor(display: u32) -> f64;
+        fn CGDisplayPixelsHigh(display: u32) -> usize;
         fn CGEventCreate(source: *const core::ffi::c_void) -> *mut core::ffi::c_void;
         fn CGEventGetLocation(event: *const core::ffi::c_void) -> CGPoint;
         fn CFRelease(cf: *const core::ffi::c_void);
     }
 
     unsafe {
-        let display = CGMainDisplayID();
-        let bounds  = CGDisplayBounds(display);
-        let scale   = CGDisplayScaleFactor(display);
+        let display   = CGMainDisplayID();
+        let bounds    = CGDisplayBounds(display);
+        // scale = physical pixels / logical points (e.g. 2.0 on Retina)
+        let scale     = if bounds.size.height > 0.0 {
+            CGDisplayPixelsHigh(display) as f64 / bounds.size.height
+        } else { 1.0 };
 
         let e = CGEventCreate(core::ptr::null());
         if e.is_null() { return (0, 0); }
@@ -238,17 +241,28 @@ fn quit_app(app: tauri::AppHandle) {
 fn enter_overlay(
     app: tauri::AppHandle,
     state: tauri::State<'_, SharedState>,
-) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
-    if let Some(w) = app.get_webview_window("overlay") {
-        let _ = w.set_ignore_cursor_events(true);
-        let _ = w.show();
+) -> Result<bool, String> {
+    // Linux는 오버레이 미지원 → 채팅 화면 유지 (false 반환)
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app;
+        let _ = state;
+        return Ok(false);
     }
-    let mut s = state.lock().unwrap();
-    s.character_zones.clear();
-    s.user_ids.clear();
-    s.is_dragging = false;
-    Ok(())
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
+        if let Some(w) = app.get_webview_window("overlay") {
+            let _ = w.set_ignore_cursor_events(true);
+            let _ = w.show();
+        }
+        let mut s = state.lock().unwrap();
+        s.character_zones.clear();
+        s.user_ids.clear();
+        s.is_dragging = false;
+        Ok(true)
+    }
 }
 
 #[tauri::command]
@@ -333,12 +347,10 @@ fn get_active_app_internal() -> String {
 fn get_active_app_internal() -> String {
     use objc2_app_kit::NSWorkspace;
 
-    let name = unsafe {
-        let ws = NSWorkspace::sharedWorkspace();
-        ws.frontmostApplication()
-            .and_then(|a| a.localizedName())
-            .map(|s| s.to_string())
-    };
+    let ws = NSWorkspace::sharedWorkspace();
+    let name = ws.frontmostApplication()
+        .and_then(|a| a.localizedName())
+        .map(|s| s.to_string());
 
     match name.as_deref() {
         Some(n) if !n.is_empty() => macos_app_to_display(n),
@@ -429,10 +441,15 @@ pub fn run() {
             use tauri::menu::{Menu, MenuItem};
             use tauri::tray::TrayIconBuilder;
 
-            let app_handle = app.handle().clone();
-            let state_for_thread = shared_state.clone();
-            thread::spawn(move || drag_monitor(app_handle, state_for_thread));
+            #[cfg(not(target_os = "linux"))]
+            {
+                let app_handle = app.handle().clone();
+                let state_for_thread = shared_state.clone();
+                thread::spawn(move || drag_monitor(app_handle, state_for_thread));
+            }
 
+            // Linux는 Wayland/X11 투명 오버레이 미지원 → 오버레이 창 생성 생략
+            #[cfg(not(target_os = "linux"))]
             tauri::WebviewWindowBuilder::new(
                 app,
                 "overlay",
