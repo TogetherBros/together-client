@@ -55,7 +55,62 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Together ${{ github.ref_name }}'
-          releaseBody: '새 버전이 출시되었습니다.'
+          releaseBody: '빌드 중...'
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
+
+  organize:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 릴리즈 노트 OS별 정리
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          REPO="${{ github.repository }}"
+
+          ASSETS=$(gh release view "$TAG" --repo "$REPO" --json assets --jq '[.assets[].name] | sort | .[]')
+
+          WIN_EXE=$(echo "$ASSETS"  | grep -E '\.exe$'      | grep -v '\.sig$' || true)
+          WIN_MSI=$(echo "$ASSETS"  | grep -E '\.msi$'      | grep -v '\.sig$' || true)
+          MAC_INT=$(echo "$ASSETS"  | grep '\.dmg$'         | grep -v 'aarch64' || true)
+          MAC_ARM=$(echo "$ASSETS"  | grep '\.dmg$'         | grep 'aarch64'    || true)
+          LINUX_D=$(echo "$ASSETS"  | grep '\.deb$'         || true)
+          LINUX_R=$(echo "$ASSETS"  | grep '\.rpm$'         || true)
+          LINUX_A=$(echo "$ASSETS"  | grep '\.AppImage$'    || true)
+
+          make_links() {
+            local label="$1"; shift
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              URL="https://github.com/$REPO/releases/download/$TAG/$f"
+              if [ -n "$label" ]; then
+                echo "- [\`$f\`]($URL) — $label"
+              else
+                echo "- [\`$f\`]($URL)"
+              fi
+            done
+          }
+
+          NOTES="## 다운로드"$'\n\n'
+
+          NOTES+="### Windows"$'\n'
+          NOTES+=$(echo "$WIN_EXE" | make_links "설치 프로그램")$'\n'
+          NOTES+=$(echo "$WIN_MSI" | make_links "MSI 패키지")$'\n'
+          NOTES+=$'\n'
+
+          NOTES+="### macOS"$'\n'
+          NOTES+=$(echo "$MAC_INT" | make_links "Intel")$'\n'
+          NOTES+=$(echo "$MAC_ARM" | make_links "Apple Silicon")$'\n'
+          NOTES+=$'\n'
+
+          NOTES+="### Linux"$'\n'
+          NOTES+=$(echo "$LINUX_D" | make_links ".deb (Debian / Ubuntu)")$'\n'
+          NOTES+=$(echo "$LINUX_R" | make_links ".rpm (Fedora / RHEL)")$'\n'
+          NOTES+=$(echo "$LINUX_A" | make_links "AppImage (범용)")$'\n'
+
+          printf '%s' "$NOTES" | gh release edit "$TAG" --repo "$REPO" --notes-file -

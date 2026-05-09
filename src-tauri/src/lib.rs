@@ -53,7 +53,28 @@ fn get_cursor_pos() -> (i32, i32) {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+fn get_cursor_pos() -> (i32, i32) {
+    #[repr(C)]
+    struct CGPoint { x: f64, y: f64 }
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventCreate(source: *const core::ffi::c_void) -> *mut core::ffi::c_void;
+        fn CGEventGetLocation(event: *const core::ffi::c_void) -> CGPoint;
+        fn CFRelease(cf: *const core::ffi::c_void);
+    }
+
+    unsafe {
+        let e = CGEventCreate(core::ptr::null());
+        if e.is_null() { return (0, 0); }
+        let p = CGEventGetLocation(e);
+        CFRelease(e);
+        (p.x as i32, p.y as i32)
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn get_cursor_pos() -> (i32, i32) { (0, 0) }
 
 // ── Left mouse button state (Windows) ────────────────────────────────────────
@@ -64,7 +85,16 @@ fn is_lmb_down() -> bool {
     unsafe { (GetAsyncKeyState(0x01) as u16 & 0x8000) != 0 }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+fn is_lmb_down() -> bool {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventSourceButtonState(stateID: i32, button: u32) -> u8;
+    }
+    unsafe { CGEventSourceButtonState(1, 0) != 0 }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn is_lmb_down() -> bool { false }
 
 
@@ -286,7 +316,51 @@ fn get_active_app_internal() -> String {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+fn get_active_app_internal() -> String {
+    use objc2_app_kit::NSWorkspace;
+
+    let name = unsafe {
+        let ws = NSWorkspace::sharedWorkspace();
+        ws.frontmostApplication()
+            .and_then(|a| a.localizedName())
+            .map(|s| s.to_string())
+    };
+
+    match name.as_deref() {
+        Some(n) if !n.is_empty() => macos_app_to_display(n),
+        _ => "앱 사용 중".to_string(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_app_to_display(name: &str) -> String {
+    let lower = name.to_lowercase();
+    let label = match lower.as_str() {
+        "safari" | "chrome" | "firefox" | "arc" | "whale" | "opera" | "brave" => {
+            return format!("{} 실행 중", name);
+        }
+        "xcode" => "Xcode 작업 중",
+        "visual studio code" | "code" => "VS Code 작업 중",
+        "intellij idea" => "IntelliJ IDEA 작업 중",
+        "pycharm" => "PyCharm 작업 중",
+        "webstorm" => "WebStorm 작업 중",
+        "discord" => "Discord 중",
+        "spotify" => "Spotify 듣는 중",
+        "slack" => "Slack 중",
+        "zoom" => "Zoom 중",
+        "obs" => "OBS 중",
+        "steam" => "Steam 중",
+        "finder" => "파인더 사용 중",
+        "terminal" | "iterm2" | "warp" => "터미널 중",
+        "notion" => "Notion 작업 중",
+        "figma" => "Figma 작업 중",
+        _ => return format!("{} 실행 중", name),
+    };
+    label.to_string()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn get_active_app_internal() -> String { "접속 중".to_string() }
 
 #[cfg(target_os = "windows")]
