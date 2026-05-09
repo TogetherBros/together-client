@@ -120,7 +120,7 @@ fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
         let (cx, cy) = get_cursor_pos();
         let lmb = is_lmb_down();
 
-        let (action, in_zone, is_dragging_now) = {
+        let (action, _in_zone, _is_dragging_now) = {
             let mut s = state.lock().unwrap();
 
             let in_zone = s.character_zones.iter().any(|z| {
@@ -289,6 +289,7 @@ fn get_active_app_internal() -> String {
 #[cfg(not(target_os = "windows"))]
 fn get_active_app_internal() -> String { "접속 중".to_string() }
 
+#[cfg(target_os = "windows")]
 fn exe_to_app_name(exe: &str, title: &str) -> String {
     let is_browser = matches!(exe, "chrome"|"msedge"|"firefox"|"whale"|"opera"|"brave"|"vivaldi");
     if is_browser {
@@ -320,6 +321,7 @@ fn exe_to_app_name(exe: &str, title: &str) -> String {
     format!("{} 실행 중", name)
 }
 
+#[cfg(target_os = "windows")]
 fn capitalize_first(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
