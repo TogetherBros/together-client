@@ -129,12 +129,14 @@ function App() {
     await invoke('enter_overlay').catch(console.error);
   };
 
-  // 트레이 "열기" → 채팅 화면 (flushSync로 렌더 완료 후 창 표시)
+  // 트레이 "열기" / 앱 재실행 / macOS 독 클릭 → 상태에 맞는 화면으로
   useEffect(() => {
     const unlisten = listen('open-chat', () => {
       const s = screenRef.current;
       flushSync(() => {
+        // 방에 참여 중이면 채팅 화면, 아니면 현재 화면 유지
         if (s === 'overlay' || s === 'chat') setScreen('chat');
+        else if (s === 'splash') setScreen('lobby');
       });
       invoke('show_main_window').catch(console.error);
     });

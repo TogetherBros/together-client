@@ -55,22 +55,35 @@ fn get_cursor_pos() -> (i32, i32) {
 
 #[cfg(target_os = "macos")]
 fn get_cursor_pos() -> (i32, i32) {
-    #[repr(C)]
-    struct CGPoint { x: f64, y: f64 }
+    #[repr(C)] struct CGPoint { x: f64, y: f64 }
+    #[repr(C)] struct CGSize  { width: f64, height: f64 }
+    #[repr(C)] struct CGRect  { origin: CGPoint, size: CGSize }
 
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
+        fn CGMainDisplayID() -> u32;
+        fn CGDisplayBounds(display: u32) -> CGRect;
+        fn CGDisplayScaleFactor(display: u32) -> f64;
         fn CGEventCreate(source: *const core::ffi::c_void) -> *mut core::ffi::c_void;
         fn CGEventGetLocation(event: *const core::ffi::c_void) -> CGPoint;
         fn CFRelease(cf: *const core::ffi::c_void);
     }
 
     unsafe {
+        let display = CGMainDisplayID();
+        let bounds  = CGDisplayBounds(display);
+        let scale   = CGDisplayScaleFactor(display);
+
         let e = CGEventCreate(core::ptr::null());
         if e.is_null() { return (0, 0); }
         let p = CGEventGetLocation(e);
         CFRelease(e);
-        (p.x as i32, p.y as i32)
+
+        // macOS CG: bottom-left origin → convert to top-left physical pixels
+        // to match window.screenX/Y * devicePixelRatio used in JS zones
+        let x = ((p.x - bounds.origin.x) * scale) as i32;
+        let y = ((bounds.size.height - (p.y - bounds.origin.y)) * scale) as i32;
+        (x, y)
     }
 }
 
@@ -484,6 +497,14 @@ pub fn run() {
 
             Ok(())
         })
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // 두 번째 인스턴스 실행 시 → 기존 창에 open-chat 신호
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.emit("open-chat", ());
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -494,6 +515,19 @@ pub fn run() {
             update_character_zones,
             get_active_app,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // macOS 독 아이콘 클릭 시 (창이 숨겨진 상태)
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = &event {
+                if !has_visible_windows {
+                    if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.emit("open-chat", ());
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                }
+            }
+        });
 }
