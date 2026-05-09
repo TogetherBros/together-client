@@ -115,6 +115,7 @@ input {
   justify-content: flex-end;
   padding: 0 8px;
   z-index: 9999;
+  background: rgba(0, 0, 0, 0.001); /* macOS: prevents click-through on transparent windows */
   -webkit-app-region: drag;
   app-region: drag;
 }

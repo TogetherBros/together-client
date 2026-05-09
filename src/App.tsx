@@ -114,8 +114,9 @@ function App() {
   const handleJoin = async (c: Omit<RoomConfig, 'deviceId' | 'joinedAt'>) => {
     const full: RoomConfig = { ...c, deviceId, joinedAt: Date.now() };
     setConfig(full);
-    setScreen('overlay');
-    await invoke('enter_overlay').catch(console.error);
+    const overlayAvailable = await invoke<boolean>('enter_overlay').catch(() => false);
+    // Linux 등 오버레이 미지원 환경은 채팅 화면으로 대체
+    setScreen(overlayAvailable ? 'overlay' : 'chat');
   };
 
   const handleLeave = async () => {
