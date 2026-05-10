@@ -4,6 +4,7 @@
   "description": "Capability for per-character overlay windows",
   "windows": ["char_*"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-start-dragging"
   ]
 }
