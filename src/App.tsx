@@ -33,7 +33,7 @@ function App() {
   const screenRef = useRef(screen);
   screenRef.current = screen;
 
-  const { users, messages, bubbleMessages, error, activityRef, takenCharacters, sendChat, sendActivity, joinWithCharacter } =
+  const { users, messages, bubbleMessages, error, characterError, clearCharacterError, activityRef, takenCharacters, sendChat, sendActivity, joinWithCharacter } =
     useRoom(config);
 
   const usersRef = useRef<UserState[]>(users);
@@ -130,7 +130,8 @@ function App() {
   };
 
   const handleCharacterConfirm = async (character: Character) => {
-    joinWithCharacter(character);
+    const success = await joinWithCharacter(character);
+    if (!success) return; // 캐릭터 중복 or 타임아웃 → CharacterSelectScreen에서 에러 표시
     const overlayAvailable = await invoke<boolean>('enter_overlay').catch(() => false);
     setScreen(overlayAvailable ? 'overlay' : 'chat');
   };
@@ -181,9 +182,12 @@ function App() {
     <div className="app">
       {screen === 'splash' && <SplashScreen />}
       {screen === 'lobby' && <LobbyScreen onJoin={handleJoin} errorMessage={lobbyError} />}
-      {screen === 'character-select' && (
+      {screen === 'character-select' && config && (
         <CharacterSelectScreen
+          roomCode={config.roomCode}
           takenCharacters={takenCharacters}
+          characterError={characterError}
+          onClearError={clearCharacterError}
           onConfirm={handleCharacterConfirm}
           onBack={handleCharacterBack}
         />
