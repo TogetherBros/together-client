@@ -25,6 +25,7 @@ function App() {
   const [deviceId] = useState<string>(getDeviceId);
   const [updateInfo, setUpdateInfo] = useState<{ version: string } | null>(null);
   const [updateState, setUpdateState] = useState<'idle' | 'downloading' | 'done'>('idle');
+  const [lobbyError, setLobbyError] = useState<string | null>(null);
   const screenRef = useRef(screen);
   screenRef.current = screen;
 
@@ -55,6 +56,7 @@ function App() {
   // 서버 에러 → 로비
   useEffect(() => {
     if (!error) return;
+    setLobbyError(error);
     setConfig(null);
     setScreen('lobby');
     invoke('leave_overlay').catch(console.error);
@@ -112,6 +114,7 @@ function App() {
   };
 
   const handleJoin = async (c: Omit<RoomConfig, 'deviceId' | 'joinedAt'>) => {
+    setLobbyError(null);
     const full: RoomConfig = { ...c, deviceId, joinedAt: Date.now() };
     setConfig(full);
     const overlayAvailable = await invoke<boolean>('enter_overlay').catch(() => false);
@@ -159,7 +162,7 @@ function App() {
   return (
     <div className="app">
       {screen === 'splash' && <SplashScreen />}
-      {screen === 'lobby' && <LobbyScreen onJoin={handleJoin} />}
+      {screen === 'lobby' && <LobbyScreen onJoin={handleJoin} errorMessage={lobbyError} />}
       {screen === 'lobby' && updateInfo && (
         <div className="update-banner">
           {updateState === 'done' ? (

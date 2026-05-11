@@ -1,4 +1,4 @@
-export type Character = 'CAT' | 'DOG' | 'BUNNY' | 'BEAR' | 'BIRD' | 'BEE';
+export type Character = 'CAT' | 'DOG' | 'BUNNY' | 'BEAR' | 'BIRD' | 'BEE' | 'MONKEY' | 'KOALA';
 
 export interface UserState {
   userId: string;

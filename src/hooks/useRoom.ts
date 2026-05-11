@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, MutableRefObject } from 'react';
 import { Client } from '@stomp/stompjs';
 import { Character, UserState, ChatMessage, RoomConfig } from '../types';
 
-const ALL_CHARACTERS: Character[] = ['DOG', 'CAT', 'BUNNY', 'BEAR', 'BIRD', 'BEE'];
+const ALL_CHARACTERS: Character[] = ['DOG', 'CAT', 'BUNNY', 'BEAR', 'BIRD', 'BEE', 'MONKEY', 'KOALA'];
 
 function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];

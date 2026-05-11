@@ -6,6 +6,8 @@ import bunnyImg from '../image/together_bunny.png';
 import bearImg from '../image/together_bear.png';
 import birdImg from '../image/together_bird.png';
 import beeImg from '../image/together_bee.png';
+import monkeyImg from '../image/together_monkey.png';
+import koalaImg from '../image/together-koala.png';
 import logoImg from '../image/together_logo.png';
 
 export { logoImg };
@@ -17,6 +19,8 @@ export const characterImages: Record<Character, string> = {
   BEAR: bearImg,
   BIRD: birdImg,
   BEE: beeImg,
+  MONKEY: monkeyImg,
+  KOALA: koalaImg,
 };
 
 export const characterMeta: { type: Character; label: string }[] = [
@@ -26,4 +30,6 @@ export const characterMeta: { type: Character; label: string }[] = [
   { type: 'BEAR', label: '곰' },
   { type: 'BIRD', label: '새' },
   { type: 'BEE', label: '꿀벌' },
+  { type: 'MONKEY', label: '원숭이' },
+  { type: 'KOALA', label: '코알라' },
 ];

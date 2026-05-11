@@ -31,9 +31,10 @@ function TitlebarButtons() {
 
 interface Props {
   onJoin: (config: Omit<RoomConfig, 'deviceId' | 'joinedAt'>) => void;
+  errorMessage?: string | null;
 }
 
-export default function LobbyScreen({ onJoin }: Props) {
+export default function LobbyScreen({ onJoin, errorMessage }: Props) {
   const [nickname, setNickname] = useState('');
   const [roomCode, setRoomCode] = useState('');
 
@@ -88,6 +89,10 @@ export default function LobbyScreen({ onJoin }: Props) {
             </button>
           </div>
         </div>
+
+        {errorMessage && (
+          <div className="lobby-error">{errorMessage}</div>
+        )}
 
         <button className="join-btn" onClick={handleJoin} disabled={!canJoin}>
           입장하기
