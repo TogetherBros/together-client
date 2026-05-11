@@ -60,74 +60,8 @@ jobs:
           prerelease: false
           args: --target ${{ matrix.target }}
 
-  flatpak:
-    name: Flatpak (Linux Universal)
-    needs: release
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Node 설치
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Python 도구 설치
-        run: pip3 install aiohttp toml tomlkit
-
-      - name: npm 설치 및 node_modules 번들
-        run: |
-          npm install
-          tar czf build-aux/node-modules.tar.gz node_modules/
-
-      - name: cargo-sources.json 생성
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py \
-            -o /tmp/flatpak-cargo-generator.py
-          python3 /tmp/flatpak-cargo-generator.py src-tauri/Cargo.lock -o build-aux/cargo-sources.json
-
-      - name: Flatpak 런타임 캐시
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/flatpak
-          key: flatpak-runtime-gnome46
-
-      - name: flatpak-builder 캐시
-        uses: actions/cache@v4
-        with:
-          path: .flatpak-builder
-          key: flatpak-builder-${{ hashFiles('build-aux/com.togetherbros.Together.yml', 'src-tauri/Cargo.lock', 'package.json') }}
-
-      - name: Flatpak 도구 설치
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
-          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-
-      - name: GNOME Platform 46 설치
-        run: |
-          flatpak install --user -y flathub \
-            org.gnome.Platform//46 \
-            org.gnome.Sdk//46 \
-            org.freedesktop.Sdk.Extension.rust-stable//23.08 \
-            org.freedesktop.Sdk.Extension.node20//23.08
-
-      - name: Flatpak 빌드
-        run: |
-          flatpak-builder --user --force-clean flatpak-builddir \
-            build-aux/com.togetherbros.Together.yml
-          flatpak build-bundle ~/.local/share/flatpak/repo \
-            Together.flatpak com.togetherbros.Together
-
-      - name: 릴리즈에 업로드
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ github.ref_name }} Together.flatpak --repo ${{ github.repository }}
-
   organize:
-    needs: [release, flatpak]
+    needs: release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -148,7 +82,6 @@ jobs:
           LINUX_D=$(echo "$ASSETS"  | grep '\.deb$'         || true)
           LINUX_R=$(echo "$ASSETS"  | grep '\.rpm$'         || true)
           LINUX_A=$(echo "$ASSETS"  | grep '\.AppImage$'    || true)
-          LINUX_F=$(echo "$ASSETS"  | grep '\.flatpak$'     || true)
 
           make_links() {
             local label="$1"; shift
@@ -179,6 +112,5 @@ jobs:
           NOTES+=$(echo "$LINUX_D" | make_links ".deb (Debian / Ubuntu / Kali)")$'\n'
           NOTES+=$(echo "$LINUX_R" | make_links ".rpm (Fedora / RHEL)")$'\n'
           NOTES+=$(echo "$LINUX_A" | make_links "AppImage (범용)")$'\n'
-          NOTES+=$(echo "$LINUX_F" | make_links "Flatpak (Arch 포함 범용)")$'\n'
 
           printf '%s' "$NOTES" | gh release edit "$TAG" --repo "$REPO" --notes-file -
