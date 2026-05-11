@@ -22,7 +22,8 @@ export default function CharacterCard({ user, index, position, bubbleMessage, sc
       className="character-pos"
       style={{ transform: `translate(${x}px, ${y}px)` }}
     >
-      <div className="character-card" style={{ animationDelay: `${index * 0.4}s`, transform: `scale(${scale})`, transformOrigin: 'bottom center' }}>
+      <div style={{ transform: `scale(${scale})`, transformOrigin: 'bottom center' }}>
+      <div className="character-card" style={{ animationDelay: `${index * 0.4}s` }}>
         {showBubble && (
           <div className={`speech-bubble${bubbleMessage ? ' speech-bubble-chat' : ''}${isTyping ? ' speech-bubble-typing' : ''}`}>
             {isTyping ? (
@@ -39,6 +40,7 @@ export default function CharacterCard({ user, index, position, bubbleMessage, sc
           draggable={false}
         />
         <div className="character-nickname">{user.nickname}</div>
+      </div>
       </div>
     </div>
   );
