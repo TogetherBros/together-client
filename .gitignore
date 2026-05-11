@@ -27,3 +27,6 @@ dist-ssr
 ~/.tauri/
 *.key
 *.key.pub
+
+# Local Cargo config (contains machine-specific paths)
+.cargo/
