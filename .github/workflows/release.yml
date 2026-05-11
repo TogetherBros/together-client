@@ -92,13 +92,38 @@ jobs:
             -o /tmp/flatpak-node-generator.py
           python3 /tmp/flatpak-node-generator.py npm package-lock.json -o build-aux/node-sources.json
 
-      - name: Flatpak 빌드
-        uses: flatpak/flatpak-github-actions@v6
+      - name: Flatpak 런타임 캐시
+        uses: actions/cache@v4
         with:
-          bundle: Together.flatpak
-          manifest-path: build-aux/com.togetherbros.Together.yml
-          cache: true
-          cache-key: flatpak-${{ hashFiles('build-aux/com.togetherbros.Together.yml', 'src-tauri/Cargo.lock', 'package-lock.json') }}
+          path: ~/.local/share/flatpak
+          key: flatpak-runtime-gnome46
+
+      - name: flatpak-builder 캐시
+        uses: actions/cache@v4
+        with:
+          path: .flatpak-builder
+          key: flatpak-builder-${{ hashFiles('build-aux/com.togetherbros.Together.yml', 'src-tauri/Cargo.lock', 'package-lock.json') }}
+
+      - name: Flatpak 도구 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: GNOME Platform 46 설치
+        run: |
+          flatpak install --user -y flathub \
+            org.gnome.Platform//46 \
+            org.gnome.Sdk//46 \
+            org.freedesktop.Sdk.Extension.rust-stable//23.08 \
+            org.freedesktop.Sdk.Extension.node20//23.08
+
+      - name: Flatpak 빌드
+        run: |
+          flatpak-builder --user --force-clean flatpak-builddir \
+            build-aux/com.togetherbros.Together.yml
+          flatpak build-bundle ~/.local/share/flatpak/repo \
+            Together.flatpak com.togetherbros.Together
 
       - name: 릴리즈에 업로드
         env:
