@@ -75,7 +75,7 @@ jobs:
           node-version: '20'
 
       - name: Python 도구 설치
-        run: pip3 install aiohttp toml
+        run: pip3 install aiohttp toml tomlkit
 
       - name: package-lock.json 확보
         run: npm install
