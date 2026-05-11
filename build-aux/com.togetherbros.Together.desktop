@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Together
+Exec=together
+Icon=com.togetherbros.Together
+Type=Application
+Categories=Network;InstantMessaging;
+Terminal=false
+Comment=함께하는 공간

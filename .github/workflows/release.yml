@@ -41,7 +41,7 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
       - name: 의존성 설치
         run: npm install
@@ -60,8 +60,53 @@ jobs:
           prerelease: false
           args: --target ${{ matrix.target }}
 
-  organize:
+  flatpak:
+    name: Flatpak (Linux Universal)
     needs: release
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node 설치
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Python 도구 설치
+        run: pip3 install aiohttp toml
+
+      - name: package-lock.json 확보
+        run: npm install
+
+      - name: cargo-sources.json 생성
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py \
+            -o /tmp/flatpak-cargo-generator.py
+          python3 /tmp/flatpak-cargo-generator.py src-tauri/Cargo.lock -o build-aux/cargo-sources.json
+
+      - name: node-sources.json 생성
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/node/flatpak-node-generator.py \
+            -o /tmp/flatpak-node-generator.py
+          python3 /tmp/flatpak-node-generator.py npm package-lock.json -o build-aux/node-sources.json
+
+      - name: Flatpak 빌드
+        uses: flatpak/flatpak-github-actions@v6
+        with:
+          bundle: Together.flatpak
+          manifest-path: build-aux/com.togetherbros.Together.yml
+          cache: true
+          cache-key: flatpak-${{ hashFiles('build-aux/com.togetherbros.Together.yml', 'src-tauri/Cargo.lock', 'package-lock.json') }}
+
+      - name: 릴리즈에 업로드
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.ref_name }} Together.flatpak --repo ${{ github.repository }}
+
+  organize:
+    needs: [release, flatpak]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -82,6 +127,7 @@ jobs:
           LINUX_D=$(echo "$ASSETS"  | grep '\.deb$'         || true)
           LINUX_R=$(echo "$ASSETS"  | grep '\.rpm$'         || true)
           LINUX_A=$(echo "$ASSETS"  | grep '\.AppImage$'    || true)
+          LINUX_F=$(echo "$ASSETS"  | grep '\.flatpak$'     || true)
 
           make_links() {
             local label="$1"; shift
@@ -109,8 +155,9 @@ jobs:
           NOTES+=$'\n'
 
           NOTES+="### Linux"$'\n'
-          NOTES+=$(echo "$LINUX_D" | make_links ".deb (Debian / Ubuntu)")$'\n'
+          NOTES+=$(echo "$LINUX_D" | make_links ".deb (Debian / Ubuntu / Kali)")$'\n'
           NOTES+=$(echo "$LINUX_R" | make_links ".rpm (Fedora / RHEL)")$'\n'
           NOTES+=$(echo "$LINUX_A" | make_links "AppImage (범용)")$'\n'
+          NOTES+=$(echo "$LINUX_F" | make_links "Flatpak (Arch 포함 범용)")$'\n'
 
           printf '%s' "$NOTES" | gh release edit "$TAG" --repo "$REPO" --notes-file -

@@ -1,0 +1,53 @@
+app-id: com.togetherbros.Together
+runtime: org.gnome.Platform
+runtime-version: '46'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.node20
+command: together
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node20/bin
+  env:
+    CARGO_HOME: /run/build/together/cargo
+    RUSTUP_HOME: /usr/lib/sdk/rust-stable
+
+finish-args:
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --share=network
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.kde.StatusNotifierWatcher
+
+modules:
+  - name: together
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: /run/build/together/cargo
+        npm_config_cache: /run/build/together/npm-cache
+        npm_config_offline: 'true'
+    build-commands:
+      - mkdir -p .cargo
+      - echo '[source.crates-io]' > .cargo/config.toml
+      - echo 'replace-with = "vendored-sources"' >> .cargo/config.toml
+      - echo '[source.vendored-sources]' >> .cargo/config.toml
+      - echo 'directory = "vendor"' >> .cargo/config.toml
+      - npm ci --ignore-scripts
+      - npm run build
+      - cargo build --release --manifest-path src-tauri/Cargo.toml
+      - install -Dm755 src-tauri/target/release/together-fe /app/bin/together
+      - install -Dm644 build-aux/com.togetherbros.Together.desktop
+          /app/share/applications/com.togetherbros.Together.desktop
+      - install -Dm644 src-tauri/icons/128x128.png
+          /app/share/icons/hicolor/128x128/apps/com.togetherbros.Together.png
+      - install -Dm644 src-tauri/icons/128x128@2x.png
+          /app/share/icons/hicolor/256x256/apps/com.togetherbros.Together.png
+    sources:
+      - type: dir
+        path: ..
+      - cargo-sources.json
+      - node-sources.json

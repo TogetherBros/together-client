@@ -84,6 +84,7 @@ function App() {
   // overlay로 유저 목록 전송 + 트레이 유저 리스트 동기화
   useEffect(() => {
     if (!config || screen === 'splash' || screen === 'lobby' || screen === 'character-select') return;
+    if (users.length === 0) return; // 재연결 중 빈 목록으로 오버레이/트레이 초기화 방지
     emitTo('overlay', 'users-updated', users).catch(console.error);
     invoke('update_overlay_users', {
       userIds: users.map((u: UserState) => u.userId),
