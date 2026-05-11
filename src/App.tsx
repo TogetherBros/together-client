@@ -4,7 +4,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, emitTo } from '@tauri-apps/api/event';
 import { check } from '@tauri-apps/plugin-updater';
 import { AppScreen, Character, RoomConfig, UserState } from './types';
+import { characterMeta } from './characters';
 import { useRoom } from './hooks/useRoom';
+
+const charLabelMap = Object.fromEntries(characterMeta.map(c => [c.type, c.label]));
 import SplashScreen from './components/SplashScreen';
 import LobbyScreen from './components/LobbyScreen';
 import CharacterSelectScreen from './components/CharacterSelectScreen';
@@ -78,10 +81,14 @@ function App() {
     return () => clearInterval(interval);
   }, [config, activityRef]);
 
-  // overlay로 유저 목록 전송
+  // overlay로 유저 목록 전송 + 트레이 유저 리스트 동기화
   useEffect(() => {
-    if (!config || screen === 'splash' || screen === 'lobby') return;
+    if (!config || screen === 'splash' || screen === 'lobby' || screen === 'character-select') return;
     emitTo('overlay', 'users-updated', users).catch(console.error);
+    invoke('update_overlay_users', {
+      userIds: users.map((u: UserState) => u.userId),
+      userLabels: users.map((u: UserState) => `${u.nickname} (${charLabelMap[u.character] ?? u.character})`),
+    }).catch(console.error);
   }, [users, config, screen]);
 
   // overlay로 말풍선 전송

@@ -1,7 +1,10 @@
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
+
+const TRAY_ID: &str = "main";
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
@@ -11,6 +14,11 @@ struct OverlayState {
     is_dragging: bool,
     drag_user_idx: usize,
     last_drag_pos: (i32, i32),
+    drag_enabled: bool,
+    character_size: u8,          // 1=small 2=medium 3=large
+    hidden_users: HashSet<String>,
+    tray_user_ids: Vec<String>,
+    tray_user_labels: Vec<String>,
 }
 
 impl Default for OverlayState {
@@ -21,6 +29,11 @@ impl Default for OverlayState {
             is_dragging: false,
             drag_user_idx: 0,
             last_drag_pos: (0, 0),
+            drag_enabled: true,
+            character_size: 2,
+            hidden_users: HashSet::new(),
+            tray_user_ids: Vec::new(),
+            tray_user_labels: Vec::new(),
         }
     }
 }
@@ -40,7 +53,52 @@ fn restore_window(app: &tauri::AppHandle) {
     }
 }
 
-// ── Cursor position (Windows) ─────────────────────────────────────────────────
+// ── Tray rebuild ──────────────────────────────────────────────────────────────
+
+fn rebuild_tray(app: &tauri::AppHandle, state: &SharedState) {
+    use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+
+    let (drag_enabled, char_size, hidden_users, user_ids, user_labels) = {
+        let s = state.lock().unwrap();
+        (s.drag_enabled, s.character_size, s.hidden_users.clone(),
+         s.tray_user_ids.clone(), s.tray_user_labels.clone())
+    };
+
+    let Ok(show)  = MenuItem::with_id(app, "show",  "채팅창 키기",  true, None::<&str>) else { return };
+    let Ok(sep0)  = PredefinedMenuItem::separator(app) else { return };
+    let Ok(drag)  = CheckMenuItem::with_id(app, "toggle-drag", "드래그", true, drag_enabled, None::<&str>) else { return };
+    let Ok(s_sm)  = CheckMenuItem::with_id(app, "size-1", "작게", true, char_size == 1, None::<&str>) else { return };
+    let Ok(s_md)  = CheckMenuItem::with_id(app, "size-2", "보통", true, char_size == 2, None::<&str>) else { return };
+    let Ok(s_lg)  = CheckMenuItem::with_id(app, "size-3", "크게", true, char_size == 3, None::<&str>) else { return };
+    let Ok(s_sub) = Submenu::with_items(app, "캐릭터 크기", true, &[&s_sm, &s_md, &s_lg]) else { return };
+    let Ok(sep1)  = PredefinedMenuItem::separator(app) else { return };
+    let Ok(reset) = MenuItem::with_id(app, "reset", "캐릭터 위치 초기화", true, None::<&str>) else { return };
+    let Ok(leave) = MenuItem::with_id(app, "leave", "방 나가기",          true, None::<&str>) else { return };
+    let Ok(sep2)  = PredefinedMenuItem::separator(app) else { return };
+    let Ok(quit)  = MenuItem::with_id(app, "quit",  "종료하기",           true, None::<&str>) else { return };
+
+    let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
+
+    if !user_ids.is_empty() {
+        let checks: Vec<CheckMenuItem<tauri::Wry>> = user_ids.iter().zip(user_labels.iter())
+            .enumerate()
+            .map(|(i, (uid, label))| {
+                let visible = !hidden_users.contains(uid.as_str());
+                CheckMenuItem::with_id(app, format!("vis-{}", i), label, true, visible, None::<&str>).unwrap()
+            })
+            .collect();
+        let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+            checks.iter().map(|c| c as &dyn tauri::menu::IsMenuItem<tauri::Wry>).collect();
+        let Ok(v_sub) = Submenu::with_items(app, "캐릭터 보기/숨기기", true, refs.as_slice()) else { return };
+        if let Ok(menu) = Menu::with_items(app, &[&show, &sep0, &drag, &s_sub, &v_sub, &sep1, &reset, &leave, &sep2, &quit]) {
+            let _ = tray.set_menu(Some(menu));
+        }
+    } else if let Ok(menu) = Menu::with_items(app, &[&show, &sep0, &drag, &s_sub, &sep1, &reset, &leave, &sep2, &quit]) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
+// ── Cursor position ───────────────────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
 fn get_cursor_pos() -> (i32, i32) {
@@ -56,33 +114,22 @@ fn get_cursor_pos() -> (i32, i32) {
 #[cfg(target_os = "macos")]
 fn get_cursor_pos() -> (i32, i32) {
     use objc2_app_kit::NSEvent;
-
     #[repr(C)] struct CgPoint { x: f64, y: f64 }
     #[repr(C)] struct CgSize  { width: f64, height: f64 }
     #[repr(C)] struct CgRect  { origin: CgPoint, size: CgSize }
-
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
         fn CGMainDisplayID() -> u32;
         fn CGDisplayBounds(display: u32) -> CgRect;
         fn CGDisplayPixelsHigh(display: u32) -> usize;
     }
-
     unsafe {
         let display = CGMainDisplayID();
         let bounds  = CGDisplayBounds(display);
-        // scale = physical pixels / logical points (Retina 2x → 2.0 등)
         let scale   = if bounds.size.height > 0.0 {
             CGDisplayPixelsHigh(display) as f64 / bounds.size.height
         } else { 1.0 };
-
-        // NSEvent::mouseLocation: 백그라운드 스레드·권한 없이 현재 커서 위치 반환
-        // 좌표계: 주 디스플레이 좌하단 원점, 단위 = 논리 포인트(logical pts)
-        // CGEventCreate(NULL)+CGEventGetLocation은 "이벤트 객체 위치"를 반환할 뿐
-        // 현재 커서 위치를 신뢰성 있게 반환하지 않아 macOS에서 항상 0,0에 가까운 값이 나왔음
         let loc = NSEvent::mouseLocation();
-
-        // 좌하단 원점(logical pts) → 좌상단 원점(physical px) 변환
         let x = ((loc.x - bounds.origin.x) * scale) as i32;
         let y = ((bounds.size.height - (loc.y - bounds.origin.y)) * scale) as i32;
         (x, y)
@@ -92,7 +139,7 @@ fn get_cursor_pos() -> (i32, i32) {
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn get_cursor_pos() -> (i32, i32) { (0, 0) }
 
-// ── Left mouse button state (Windows) ────────────────────────────────────────
+// ── Left mouse button state ───────────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
 fn is_lmb_down() -> bool {
@@ -102,27 +149,21 @@ fn is_lmb_down() -> bool {
 
 #[cfg(target_os = "macos")]
 fn is_lmb_down() -> bool {
-    #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" {
-        fn CGEventSourceButtonState(stateID: i32, button: u32) -> u8;
-    }
-    unsafe { CGEventSourceButtonState(1, 0) != 0 }
+    use objc2_app_kit::NSEvent;
+    // pressedMouseButtons() 비트0 = 좌클릭. CGEventSourceButtonState보다 신뢰성 높음
+    unsafe { NSEvent::pressedMouseButtons() & 1 != 0 }
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn is_lmb_down() -> bool { false }
 
-
-// ── System cursor replacement (Windows) ──────────────────────────────────────
-// passthrough 토글 없이 시스템 전체 화살표 커서를 손 모양으로 교체.
-// SetSystemCursor는 커서 핸들 소유권을 가져가므로 반드시 CopyIcon으로 복사본 전달.
-// 드래그 종료 시 SPI_SETCURSORS로 레지스트리 기본값으로 복원.
+// ── System cursor (Windows only) ──────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
 fn set_drag_cursor() {
     use winapi::um::winuser::{CopyIcon, LoadCursorW, SetSystemCursor};
-    const IDC_HAND:   usize = 32649;
-    const OCR_NORMAL: u32   = 32512;
+    const IDC_HAND: usize = 32649;
+    const OCR_NORMAL: u32 = 32512;
     unsafe {
         let hand = LoadCursorW(std::ptr::null_mut(), IDC_HAND as *const u16);
         if hand.is_null() { return; }
@@ -130,7 +171,6 @@ fn set_drag_cursor() {
         if !copy.is_null() { SetSystemCursor(copy, OCR_NORMAL); }
     }
 }
-
 #[cfg(not(target_os = "windows"))]
 fn set_drag_cursor() {}
 
@@ -140,24 +180,16 @@ fn restore_drag_cursor() {
     const SPI_SETCURSORS: u32 = 0x0057;
     unsafe { SystemParametersInfoW(SPI_SETCURSORS, 0, std::ptr::null_mut(), 0); }
 }
-
 #[cfg(not(target_os = "windows"))]
 fn restore_drag_cursor() {}
 
 // ── Drag monitor ──────────────────────────────────────────────────────────────
-// 오버레이는 항상 passthrough. Rust가 OS 레벨에서 마우스 버튼+위치를 폴링해
-// 드래그를 감지하고 물리 픽셀 델타를 drag-move 이벤트로 오버레이 JS에 전달.
 
 fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
-    enum Action {
-        None,
-        StartDrag(String),
-        MoveDrag(String, i32, i32),
-        EndDrag(String),
-    }
+    enum Action { None, StartDrag(String), MoveDrag(String, i32, i32), EndDrag(String) }
 
     loop {
-        thread::sleep(Duration::from_millis(16)); // ~60 fps
+        thread::sleep(Duration::from_millis(16));
 
         let Some(overlay) = app.get_webview_window("overlay") else { continue };
         if !overlay.is_visible().unwrap_or(false) { continue; }
@@ -165,14 +197,18 @@ fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
         let (cx, cy) = get_cursor_pos();
         let lmb = is_lmb_down();
 
-        let (action, _in_zone, _is_dragging_now) = {
+        let action = {
             let mut s = state.lock().unwrap();
 
-            let in_zone = s.character_zones.iter().any(|z| {
-                cx >= z[0] && cx < z[0] + z[2] && cy >= z[1] && cy < z[1] + z[3]
-            });
-
-            let action = if !s.is_dragging && lmb {
+            if !s.drag_enabled {
+                if s.is_dragging && !lmb {
+                    let uid = s.user_ids.get(s.drag_user_idx).cloned().unwrap_or_default();
+                    s.is_dragging = false;
+                    Action::EndDrag(uid)
+                } else {
+                    Action::None
+                }
+            } else if !s.is_dragging && lmb {
                 let idx = s.character_zones.iter().position(|z| {
                     cx >= z[0] && cx < z[0] + z[2] && cy >= z[1] && cy < z[1] + z[3]
                 });
@@ -182,9 +218,7 @@ fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
                     s.drag_user_idx = i;
                     s.last_drag_pos = (cx, cy);
                     Action::StartDrag(uid)
-                } else {
-                    Action::None
-                }
+                } else { Action::None }
             } else if s.is_dragging {
                 if lmb {
                     let dx = cx - s.last_drag_pos.0;
@@ -193,32 +227,19 @@ fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
                         let uid = s.user_ids.get(s.drag_user_idx).cloned().unwrap_or_default();
                         s.last_drag_pos = (cx, cy);
                         Action::MoveDrag(uid, dx, dy)
-                    } else {
-                        Action::None
-                    }
+                    } else { Action::None }
                 } else {
                     let uid = s.user_ids.get(s.drag_user_idx).cloned().unwrap_or_default();
                     s.is_dragging = false;
                     Action::EndDrag(uid)
                 }
-            } else {
-                Action::None
-            };
-
-            (action, in_zone, s.is_dragging)
+            } else { Action::None }
         };
 
-
         match action {
-            Action::StartDrag(uid) => {
-                set_drag_cursor();
-                let _ = overlay.emit("drag-start", uid);
-            }
+            Action::StartDrag(uid) => { set_drag_cursor(); let _ = overlay.emit("drag-start", uid); }
             Action::MoveDrag(uid, dx, dy) => { let _ = overlay.emit("drag-move", (uid, dx, dy)); }
-            Action::EndDrag(uid) => {
-                restore_drag_cursor();
-                let _ = overlay.emit("drag-end", uid);
-            }
+            Action::EndDrag(uid) => { restore_drag_cursor(); let _ = overlay.emit("drag-end", uid); }
             Action::None => {}
         }
     }
@@ -227,27 +248,18 @@ fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
 // ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
-fn show_main_window(app: tauri::AppHandle) {
-    restore_window(&app);
-}
+fn show_main_window(app: tauri::AppHandle) { restore_window(&app); }
 
 #[tauri::command]
-fn quit_app(app: tauri::AppHandle) {
-    app.exit(0);
-}
+fn quit_app(app: tauri::AppHandle) { app.exit(0); }
 
 #[tauri::command]
 fn enter_overlay(
     app: tauri::AppHandle,
     state: tauri::State<'_, SharedState>,
 ) -> Result<bool, String> {
-    // Linux는 오버레이 미지원 → 채팅 화면 유지 (false 반환)
     #[cfg(target_os = "linux")]
-    {
-        let _ = app;
-        let _ = state;
-        return Ok(false);
-    }
+    { let _ = (app, state); return Ok(false); }
 
     #[cfg(not(target_os = "linux"))]
     {
@@ -256,10 +268,18 @@ fn enter_overlay(
             let _ = w.set_ignore_cursor_events(true);
             let _ = w.show();
         }
-        let mut s = state.lock().unwrap();
-        s.character_zones.clear();
-        s.user_ids.clear();
-        s.is_dragging = false;
+        let (char_size, hidden_vec) = {
+            let mut s = state.lock().unwrap();
+            s.character_zones.clear();
+            s.user_ids.clear();
+            s.is_dragging = false;
+            let hv: Vec<String> = s.hidden_users.iter().cloned().collect();
+            (s.character_size, hv)
+        };
+        if let Some(w) = app.get_webview_window("overlay") {
+            let _ = w.emit("character-size-changed", char_size);
+            let _ = w.emit("hidden-users-changed", hidden_vec);
+        }
         Ok(true)
     }
 }
@@ -271,10 +291,15 @@ fn leave_overlay(
 ) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("overlay") { let _ = w.hide(); }
     restore_window(&app);
-    let mut s = state.lock().unwrap();
-    s.character_zones.clear();
-    s.user_ids.clear();
-    s.is_dragging = false;
+    {
+        let mut s = state.lock().unwrap();
+        s.character_zones.clear();
+        s.user_ids.clear();
+        s.is_dragging = false;
+        s.tray_user_ids.clear();
+        s.tray_user_labels.clear();
+    }
+    rebuild_tray(&app, &state);
     Ok(())
 }
 
@@ -285,19 +310,32 @@ fn update_character_zones(
     state: tauri::State<'_, SharedState>,
 ) {
     let mut s = state.lock().unwrap();
-    s.character_zones = zones
-        .into_iter()
+    s.character_zones = zones.into_iter()
         .filter_map(|z| if z.len() == 4 { Some([z[0], z[1], z[2], z[3]]) } else { None })
         .collect();
     s.user_ids = user_ids;
 }
 
 #[tauri::command]
-fn get_active_app() -> String {
-    get_active_app_internal()
+fn update_overlay_users(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SharedState>,
+    user_ids: Vec<String>,
+    user_labels: Vec<String>,
+) {
+    {
+        let mut s = state.lock().unwrap();
+        s.hidden_users.retain(|id| user_ids.contains(id));
+        s.tray_user_ids = user_ids;
+        s.tray_user_labels = user_labels;
+    }
+    rebuild_tray(&app, &state);
 }
 
-// ── Active app detection (Windows) ───────────────────────────────────────────
+#[tauri::command]
+fn get_active_app() -> String { get_active_app_internal() }
+
+// ── Active app detection ──────────────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
 fn get_active_app_internal() -> String {
@@ -307,37 +345,26 @@ fn get_active_app_internal() -> String {
     use winapi::um::winbase::QueryFullProcessImageNameW;
     use winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION;
     use winapi::um::winuser::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
-
     unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.is_null() { return "접속 중".to_string(); }
-
         let mut title_buf = [0u16; 512];
         let title_len = GetWindowTextW(hwnd, title_buf.as_mut_ptr(), 512);
         let title = if title_len > 0 {
             String::from_utf16_lossy(&title_buf[..title_len as usize])
         } else { String::new() };
-
         let mut pid: DWORD = 0;
         GetWindowThreadProcessId(hwnd, &mut pid);
         if pid == 0 { return "접속 중".to_string(); }
-
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if handle.is_null() { return "접속 중".to_string(); }
-
         let mut exe_buf = [0u16; 512];
         let mut size: DWORD = 512;
         let ok = QueryFullProcessImageNameW(handle, 0, exe_buf.as_mut_ptr(), &mut size);
         CloseHandle(handle);
-
         if ok == 0 || size == 0 { return "접속 중".to_string(); }
-
         let path = String::from_utf16_lossy(&exe_buf[..size as usize]);
-        let exe = path.split('\\').last().unwrap_or("")
-            .to_lowercase()
-            .trim_end_matches(".exe")
-            .to_string();
-
+        let exe = path.split('\\').last().unwrap_or("").to_lowercase().trim_end_matches(".exe").to_string();
         exe_to_app_name(&exe, &title)
     }
 }
@@ -345,12 +372,10 @@ fn get_active_app_internal() -> String {
 #[cfg(target_os = "macos")]
 fn get_active_app_internal() -> String {
     use objc2_app_kit::NSWorkspace;
-
     let ws = NSWorkspace::sharedWorkspace();
     let name = ws.frontmostApplication()
         .and_then(|a| a.localizedName())
         .map(|s| s.to_string());
-
     match name.as_deref() {
         Some(n) if !n.is_empty() => macos_app_to_display(n),
         _ => "앱 사용 중".to_string(),
@@ -361,11 +386,9 @@ fn get_active_app_internal() -> String {
 fn macos_app_to_display(name: &str) -> String {
     let lower = name.to_lowercase();
     let label = match lower.as_str() {
-        "safari" | "chrome" | "firefox" | "arc" | "whale" | "opera" | "brave" => {
-            return format!("{} 실행 중", name);
-        }
+        "safari"|"chrome"|"firefox"|"arc"|"whale"|"opera"|"brave" => return format!("{} 실행 중", name),
         "xcode" => "Xcode 작업 중",
-        "visual studio code" | "code" => "VS Code 작업 중",
+        "visual studio code"|"code" => "VS Code 작업 중",
         "intellij idea" => "IntelliJ IDEA 작업 중",
         "pycharm" => "PyCharm 작업 중",
         "webstorm" => "WebStorm 작업 중",
@@ -376,7 +399,7 @@ fn macos_app_to_display(name: &str) -> String {
         "obs" => "OBS 중",
         "steam" => "Steam 중",
         "finder" => "파인더 사용 중",
-        "terminal" | "iterm2" | "warp" => "터미널 중",
+        "terminal"|"iterm2"|"warp" => "터미널 중",
         "notion" => "Notion 작업 중",
         "figma" => "Figma 작업 중",
         _ => return format!("{} 실행 중", name),
@@ -398,11 +421,8 @@ fn exe_to_app_name(exe: &str, title: &str) -> String {
         if tl.contains("github")  { return "GitHub 보는 중".to_string(); }
         if tl.contains("notion")  { return "Notion 작업 중".to_string(); }
         if tl.contains("figma")   { return "Figma 작업 중".to_string(); }
-        let browser = match exe {
-            "chrome"=>"Chrome","msedge"=>"Edge","firefox"=>"Firefox",
-            "whale"=>"Whale","opera"=>"Opera","brave"=>"Brave",_=>"브라우저",
-        };
-        return format!("{} 실행 중", browser);
+        let b = match exe { "chrome"=>"Chrome","msedge"=>"Edge","firefox"=>"Firefox","whale"=>"Whale","opera"=>"Opera","brave"=>"Brave",_=>"브라우저" };
+        return format!("{} 실행 중", b);
     }
     let name = match exe {
         "idea64"|"idea"=>"IntelliJ IDEA","code"=>"VS Code",
@@ -422,10 +442,7 @@ fn exe_to_app_name(exe: &str, title: &str) -> String {
 #[cfg(target_os = "windows")]
 fn capitalize_first(s: &str) -> String {
     let mut c = s.chars();
-    match c.next() {
-        None => String::new(),
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-    }
+    match c.next() { None => String::new(), Some(f) => f.to_uppercase().collect::<String>() + c.as_str() }
 }
 
 // ── App setup ─────────────────────────────────────────────────────────────────
@@ -437,7 +454,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(shared_state.clone())
         .setup(move |app| {
-            use tauri::menu::{Menu, MenuItem};
+            use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
             use tauri::tray::TrayIconBuilder;
 
             #[cfg(not(target_os = "linux"))]
@@ -447,80 +464,102 @@ pub fn run() {
                 thread::spawn(move || drag_monitor(app_handle, state_for_thread));
             }
 
-            // Linux는 Wayland/X11 투명 오버레이 미지원 → 오버레이 창 생성 생략
             #[cfg(not(target_os = "linux"))]
-            tauri::WebviewWindowBuilder::new(
-                app,
-                "overlay",
-                tauri::WebviewUrl::App("index.html".into()),
-            )
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .maximized(true)
-            .resizable(false)
-            .shadow(false)
-            .focused(false)
-            .visible(false)
-            .build()?;
+            tauri::WebviewWindowBuilder::new(app, "overlay", tauri::WebviewUrl::App("index.html".into()))
+                .decorations(false).transparent(true).always_on_top(true)
+                .skip_taskbar(true).maximized(true).resizable(false)
+                .shadow(false).focused(false).visible(false)
+                .build()?;
 
             #[cfg(debug_assertions)]
-            if let Some(w) = app.get_webview_window("main") {
-                w.open_devtools();
-            }
+            if let Some(w) = app.get_webview_window("main") { w.open_devtools(); }
 
             let app_handle2 = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
-                        if let Some(w) = app_handle2.get_webview_window("main") {
-                            let _ = w.hide();
-                        }
+                        if let Some(w) = app_handle2.get_webview_window("main") { let _ = w.hide(); }
                     }
                 });
             }
 
-            use tauri::menu::PredefinedMenuItem;
-
             let show  = MenuItem::with_id(app, "show",  "채팅창 키기",       true, None::<&str>)?;
+            let sep0  = PredefinedMenuItem::separator(app)?;
+            let drag  = CheckMenuItem::with_id(app, "toggle-drag", "드래그",  true, true,  None::<&str>)?;
+            let s_sm  = CheckMenuItem::with_id(app, "size-1", "작게",         true, false, None::<&str>)?;
+            let s_md  = CheckMenuItem::with_id(app, "size-2", "보통",         true, true,  None::<&str>)?;
+            let s_lg  = CheckMenuItem::with_id(app, "size-3", "크게",         true, false, None::<&str>)?;
+            let s_sub = Submenu::with_items(app, "캐릭터 크기", true, &[&s_sm, &s_md, &s_lg])?;
+            let sep1  = PredefinedMenuItem::separator(app)?;
             let reset = MenuItem::with_id(app, "reset", "캐릭터 위치 초기화", true, None::<&str>)?;
             let leave = MenuItem::with_id(app, "leave", "방 나가기",          true, None::<&str>)?;
-            let sep   = PredefinedMenuItem::separator(app)?;
+            let sep2  = PredefinedMenuItem::separator(app)?;
             let quit  = MenuItem::with_id(app, "quit",  "종료하기",           true, None::<&str>)?;
-            let menu  = Menu::with_items(app, &[&show, &reset, &leave, &sep, &quit])?;
+            let menu  = Menu::with_items(app, &[&show, &sep0, &drag, &s_sub, &sep1, &reset, &leave, &sep2, &quit])?;
 
-            TrayIconBuilder::new()
+            let state_for_tray = shared_state.clone();
+            TrayIconBuilder::with_id(TRAY_ID)
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.emit("open-chat", ());
+                .on_menu_event(move |app, event| {
+                    match event.id.as_ref() {
+                        "show" => {
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.emit("open-chat", ());
+                            }
                         }
-                    }
-                    "reset" => {
-                        if let Some(w) = app.get_webview_window("overlay") {
-                            let _ = w.emit("reset-positions", ());
+                        "toggle-drag" => {
+                            { state_for_tray.lock().unwrap().drag_enabled ^= true; }
+                            rebuild_tray(app, &state_for_tray);
                         }
-                    }
-                    "leave" => {
-                        if let Some(w) = app.get_webview_window("overlay") { let _ = w.hide(); }
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.emit("leave-overlay", ());
+                        id @ ("size-1" | "size-2" | "size-3") => {
+                            let size: u8 = id.trim_start_matches("size-").parse().unwrap_or(2);
+                            { state_for_tray.lock().unwrap().character_size = size; }
+                            if let Some(w) = app.get_webview_window("overlay") {
+                                let _ = w.emit("character-size-changed", size);
+                            }
+                            rebuild_tray(app, &state_for_tray);
                         }
+                        "reset" => {
+                            if let Some(w) = app.get_webview_window("overlay") {
+                                let _ = w.emit("reset-positions", ());
+                            }
+                        }
+                        "leave" => {
+                            if let Some(w) = app.get_webview_window("overlay") { let _ = w.hide(); }
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.emit("leave-overlay", ());
+                            }
+                        }
+                        "quit" => app.exit(0),
+                        id if id.starts_with("vis-") => {
+                            let idx: usize = id.trim_start_matches("vis-").parse().unwrap_or(0);
+                            let hidden_vec = {
+                                let mut s = state_for_tray.lock().unwrap();
+                                if let Some(uid) = s.tray_user_ids.get(idx).cloned() {
+                                    if s.hidden_users.contains(&uid) {
+                                        s.hidden_users.remove(&uid);
+                                    } else {
+                                        s.hidden_users.insert(uid);
+                                    }
+                                }
+                                s.hidden_users.iter().cloned().collect::<Vec<_>>()
+                            };
+                            if let Some(w) = app.get_webview_window("overlay") {
+                                let _ = w.emit("hidden-users-changed", hidden_vec);
+                            }
+                            rebuild_tray(app, &state_for_tray);
+                        }
+                        _ => {}
                     }
-                    "quit" => app.exit(0),
-                    _ => {}
                 })
                 .build(app)?;
 
             Ok(())
         })
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            // 두 번째 인스턴스 실행 시 → 기존 창에 open-chat 신호
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.emit("open-chat", ());
                 let _ = w.show();
@@ -535,16 +574,16 @@ pub fn run() {
             enter_overlay,
             leave_overlay,
             update_character_zones,
+            update_overlay_users,
             get_active_app,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            // macOS 독 아이콘 클릭 시 (창이 숨겨진 상태)
+        .run(|_app, _event| {
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = &event {
+            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = &_event {
                 if !has_visible_windows {
-                    if let Some(w) = app.get_webview_window("main") {
+                    if let Some(w) = _app.get_webview_window("main") {
                         let _ = w.emit("open-chat", ());
                         let _ = w.show();
                         let _ = w.set_focus();

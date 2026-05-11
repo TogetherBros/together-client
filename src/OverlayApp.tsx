@@ -7,6 +7,8 @@ import CharacterCard from './components/CharacterCard';
 
 type Position = { x: number; y: number };
 
+const SIZE_SCALE: Record<number, number> = { 1: 0.7, 2: 1.0, 3: 1.35 };
+
 function loadPositions(): Record<string, Position> {
   try { return JSON.parse(sessionStorage.getItem('together-positions') || '{}'); }
   catch { return {}; }
@@ -20,6 +22,8 @@ export default function OverlayApp() {
   const [users, setUsers] = useState<UserState[]>([]);
   const [bubbleMessages, setBubbleMessages] = useState<Record<string, string>>({});
   const [positions, setPositions] = useState<Record<string, Position>>(loadPositions);
+  const [characterSize, setCharacterSize] = useState<number>(2);
+  const [hiddenUsers, setHiddenUsers] = useState<Set<string>>(new Set());
 
   const usersRef = useRef<UserState[]>([]);
   const positionsRef = useRef<Record<string, Position>>({});
@@ -27,10 +31,10 @@ export default function OverlayApp() {
   useEffect(() => { usersRef.current = users; }, [users]);
   useEffect(() => { positionsRef.current = positions; }, [positions]);
 
-  // Report zone coords to Rust every 50ms so it knows where to detect drags
+  // Report zone coords to Rust every 50ms (hidden users excluded from drag zones)
   useEffect(() => {
     const id = setInterval(() => {
-      const us = usersRef.current;
+      const us = usersRef.current.filter(u => !hiddenUsers.has(u.userId));
       if (us.length === 0) return;
       const dpr = window.devicePixelRatio || 1;
       const ox = Math.round(window.screenX * dpr);
@@ -48,9 +52,9 @@ export default function OverlayApp() {
       invoke('update_character_zones', { zones, userIds }).catch(() => {});
     }, 50);
     return () => clearInterval(id);
-  }, []);
+  }, [hiddenUsers]);
 
-  // Receive drag-move events emitted by Rust (physical pixel deltas)
+  // Drag-move events from Rust
   useEffect(() => {
     const unM = listen<[string, number, number]>('drag-move', e => {
       const [userId, dxPhys, dyPhys] = e.payload;
@@ -77,19 +81,34 @@ export default function OverlayApp() {
       sessionStorage.removeItem('together-positions');
       setPositions({});
     });
-    return () => { unU.then(f => f()); unB.then(f => f()); unR.then(f => f()); };
+    const unS = listen<number>('character-size-changed', e => setCharacterSize(e.payload));
+    const unH = listen<string[]>('hidden-users-changed', e => setHiddenUsers(new Set(e.payload)));
+    return () => { unU.then(f => f()); unB.then(f => f()); unR.then(f => f()); unS.then(f => f()); unH.then(f => f()); };
   }, []);
+
+  const scale = SIZE_SCALE[characterSize] ?? 1.0;
+  const visibleUsers = users.filter(u => !hiddenUsers.has(u.userId));
 
   return (
     <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', background: 'transparent', overflow: 'hidden' }}>
-      {users.map((user, i) => (
-        <CharacterCard
+      {visibleUsers.map((user, i) => (
+        <div
           key={user.userId}
-          user={user}
-          index={i}
-          position={positions[user.userId] ?? getCharacterPosition(i, users.length)}
-          bubbleMessage={bubbleMessages[user.userId]}
-        />
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            transformOrigin: 'bottom center',
+            transform: `scale(${scale})`,
+          }}
+        >
+          <CharacterCard
+            user={user}
+            index={i}
+            position={positions[user.userId] ?? getCharacterPosition(i, visibleUsers.length)}
+            bubbleMessage={bubbleMessages[user.userId]}
+          />
+        </div>
       ))}
     </div>
   );
