@@ -2,11 +2,9 @@ import { useEffect, useRef, useState, MutableRefObject } from 'react';
 import { Client } from '@stomp/stompjs';
 import { Character, UserState, ChatMessage, RoomConfig } from '../types';
 
-const ALL_CHARACTERS: Character[] = ['DOG', 'CAT', 'BUNNY', 'BEAR', 'BIRD', 'BEE', 'MONKEY', 'KOALA'];
+const ALL_CHARACTERS: Character[] = ['DOG', 'CAT', 'BUNNY', 'BEAR', 'BIRD', 'BEE', 'MONKEY', 'KOALA', 'KAKATU', 'DOLPHIN'];
 
-function pickRandom<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+export { ALL_CHARACTERS };
 
 export interface RoomState {
   users: UserState[];
@@ -14,8 +12,10 @@ export interface RoomState {
   bubbleMessages: Record<string, string>;
   error: string | null;
   activityRef: MutableRefObject<string>;
+  takenCharacters: Character[];
   sendChat: (text: string) => void;
   sendActivity: (activity: string) => void;
+  joinWithCharacter: (character: Character) => void;
 }
 
 export function useRoom(config: RoomConfig | null): RoomState {
@@ -27,8 +27,10 @@ export function useRoom(config: RoomConfig | null): RoomState {
   const clientRef = useRef<Client | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activityRef = useRef('접속 중');
-  // 서버에 최종 등록된 캐릭터 (충돌 해소 후 갱신)
-  const charRef = useRef<Character>('DOG');
+  const charRef = useRef<Character | null>(null);
+  const hasJoinedRef = useRef(false);
+  const configRef = useRef(config);
+  configRef.current = config;
 
   useEffect(() => {
     if (!config) {
@@ -36,13 +38,28 @@ export function useRoom(config: RoomConfig | null): RoomState {
       setMessages([]);
       setBubbleMessages({});
       setError(null);
+      charRef.current = null;
+      hasJoinedRef.current = false;
       return;
     }
 
-    const { roomCode, deviceId, nickname } = config;
-    charRef.current = pickRandom(ALL_CHARACTERS); // 랜덤 초기 배정
+    charRef.current = null;
+    hasJoinedRef.current = false;
 
+    const { roomCode, deviceId, nickname } = config;
     let errorTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const startInterval = (client: Client) => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = setInterval(() => {
+        if (client.connected) {
+          client.publish({
+            destination: `/app/room/${roomCode}/activity`,
+            body: JSON.stringify({ userId: deviceId, activity: activityRef.current }),
+          });
+        }
+      }, 3000);
+    };
 
     const client = new Client({
       brokerURL: 'wss://api.togetherbros.uk/ws',
@@ -58,40 +75,17 @@ export function useRoom(config: RoomConfig | null): RoomState {
       },
       onConnect: () => {
         if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
-        // ── 유저 목록 구독 ──────────────────────────────
+
         client.subscribe(`/topic/room/${roomCode}`, (msg) => {
           const received: UserState[] = JSON.parse(msg.body);
           setUsers(received);
-
-          // 다른 사람과 캐릭터 충돌 시 첫 번째 빈 캐릭터로 재배정
-          const others = received.filter(u => u.userId !== deviceId);
-          const taken = new Set(others.map(u => u.character));
-
-          if (taken.has(charRef.current)) {
-            const available = ALL_CHARACTERS.filter(c => !taken.has(c));
-            if (available.length > 0) {
-              const next = pickRandom(available);
-              charRef.current = next;
-              client.publish({
-                destination: `/app/room/${roomCode}/join`,
-                body: JSON.stringify({
-                  userId: deviceId,
-                  nickname,
-                  character: next,
-                  activity: activityRef.current,
-                }),
-              });
-            }
-          }
         });
 
-        // ── 채팅 구독 ───────────────────────────────────
         client.subscribe(`/topic/room/${roomCode}/chat`, (msg) => {
           const chatMsg: ChatMessage = JSON.parse(msg.body);
           const localMsg: ChatMessage = { ...chatMsg, sentAt: new Date().toISOString() };
           setMessages(prev => [...prev, localMsg]);
 
-          // 3.5초 동안 캐릭터 머리 위 말풍선 표시
           setBubbleMessages(prev => ({ ...prev, [chatMsg.userId]: chatMsg.message }));
           setTimeout(() => {
             setBubbleMessages(prev => {
@@ -101,32 +95,23 @@ export function useRoom(config: RoomConfig | null): RoomState {
           }, 3500);
         });
 
-        // ── 에러 구독 ───────────────────────────────────
         client.subscribe('/user/queue/error', (msg) => {
           setError(msg.body);
         });
 
-        // ── 방 입장 ─────────────────────────────────────
-        client.publish({
-          destination: `/app/room/${roomCode}/join`,
-          body: JSON.stringify({
-            userId: deviceId,
-            nickname,
-            character: charRef.current,
-            activity: activityRef.current,
-          }),
-        });
-
-        // ── 활동 주기 전송 (3초) ─────────────────────────
-        if (intervalRef.current) clearInterval(intervalRef.current);
-        intervalRef.current = setInterval(() => {
-          if (client.connected) {
-            client.publish({
-              destination: `/app/room/${roomCode}/activity`,
-              body: JSON.stringify({ userId: deviceId, activity: activityRef.current }),
-            });
-          }
-        }, 3000);
+        // 재연결 시 이미 입장한 상태면 재입장
+        if (hasJoinedRef.current && charRef.current) {
+          client.publish({
+            destination: `/app/room/${roomCode}/join`,
+            body: JSON.stringify({
+              userId: deviceId,
+              nickname,
+              character: charRef.current,
+              activity: activityRef.current,
+            }),
+          });
+          startInterval(client);
+        }
       },
     });
 
@@ -139,7 +124,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
-      if (client.connected) {
+      if (client.connected && hasJoinedRef.current) {
         client.publish({
           destination: `/app/room/${roomCode}/leave`,
           body: JSON.stringify({ userId: deviceId }),
@@ -150,9 +135,35 @@ export function useRoom(config: RoomConfig | null): RoomState {
     };
   }, [config]);
 
+  const joinWithCharacter = (character: Character) => {
+    charRef.current = character;
+    hasJoinedRef.current = true;
+    const client = clientRef.current;
+    const cfg = configRef.current;
+    if (!client?.connected || !cfg) return;
+    client.publish({
+      destination: `/app/room/${cfg.roomCode}/join`,
+      body: JSON.stringify({
+        userId: cfg.deviceId,
+        nickname: cfg.nickname,
+        character,
+        activity: activityRef.current,
+      }),
+    });
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      if (client.connected) {
+        client.publish({
+          destination: `/app/room/${cfg.roomCode}/activity`,
+          body: JSON.stringify({ userId: cfg.deviceId, activity: activityRef.current }),
+        });
+      }
+    }, 3000);
+  };
+
   const sendChat = (text: string) => {
     const client = clientRef.current;
-    if (!client?.connected || !config) return;
+    if (!client?.connected || !config || !charRef.current) return;
     client.publish({
       destination: `/app/room/${config.roomCode}/chat`,
       body: JSON.stringify({
@@ -165,7 +176,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
   };
 
   const sendActivity = (activity: string) => {
-    activityRef.current = activity; // 인터벌도 이 값을 전송하므로 함께 갱신
+    activityRef.current = activity;
     const client = clientRef.current;
     if (!client?.connected || !config) return;
     client.publish({
@@ -174,5 +185,9 @@ export function useRoom(config: RoomConfig | null): RoomState {
     });
   };
 
-  return { users, messages, bubbleMessages, error, activityRef, sendChat, sendActivity };
+  const takenCharacters = users
+    .filter(u => u.userId !== config?.deviceId)
+    .map(u => u.character);
+
+  return { users, messages, bubbleMessages, error, activityRef, takenCharacters, sendChat, sendActivity, joinWithCharacter };
 }

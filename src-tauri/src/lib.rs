@@ -55,37 +55,36 @@ fn get_cursor_pos() -> (i32, i32) {
 
 #[cfg(target_os = "macos")]
 fn get_cursor_pos() -> (i32, i32) {
-    #[repr(C)] struct CGPoint { x: f64, y: f64 }
-    #[repr(C)] struct CGSize  { width: f64, height: f64 }
-    #[repr(C)] struct CGRect  { origin: CGPoint, size: CGSize }
+    use objc2_app_kit::NSEvent;
+
+    #[repr(C)] struct CgPoint { x: f64, y: f64 }
+    #[repr(C)] struct CgSize  { width: f64, height: f64 }
+    #[repr(C)] struct CgRect  { origin: CgPoint, size: CgSize }
 
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
         fn CGMainDisplayID() -> u32;
-        fn CGDisplayBounds(display: u32) -> CGRect;
+        fn CGDisplayBounds(display: u32) -> CgRect;
         fn CGDisplayPixelsHigh(display: u32) -> usize;
-        fn CGEventCreate(source: *const core::ffi::c_void) -> *mut core::ffi::c_void;
-        fn CGEventGetLocation(event: *const core::ffi::c_void) -> CGPoint;
-        fn CFRelease(cf: *const core::ffi::c_void);
     }
 
     unsafe {
-        let display   = CGMainDisplayID();
-        let bounds    = CGDisplayBounds(display);
-        // scale = physical pixels / logical points (e.g. 2.0 on Retina)
-        let scale     = if bounds.size.height > 0.0 {
+        let display = CGMainDisplayID();
+        let bounds  = CGDisplayBounds(display);
+        // scale = physical pixels / logical points (Retina 2x → 2.0 등)
+        let scale   = if bounds.size.height > 0.0 {
             CGDisplayPixelsHigh(display) as f64 / bounds.size.height
         } else { 1.0 };
 
-        let e = CGEventCreate(core::ptr::null());
-        if e.is_null() { return (0, 0); }
-        let p = CGEventGetLocation(e);
-        CFRelease(e);
+        // NSEvent::mouseLocation: 백그라운드 스레드·권한 없이 현재 커서 위치 반환
+        // 좌표계: 주 디스플레이 좌하단 원점, 단위 = 논리 포인트(logical pts)
+        // CGEventCreate(NULL)+CGEventGetLocation은 "이벤트 객체 위치"를 반환할 뿐
+        // 현재 커서 위치를 신뢰성 있게 반환하지 않아 macOS에서 항상 0,0에 가까운 값이 나왔음
+        let loc = NSEvent::mouseLocation();
 
-        // macOS CG: bottom-left origin → convert to top-left physical pixels
-        // to match window.screenX/Y * devicePixelRatio used in JS zones
-        let x = ((p.x - bounds.origin.x) * scale) as i32;
-        let y = ((bounds.size.height - (p.y - bounds.origin.y)) * scale) as i32;
+        // 좌하단 원점(logical pts) → 좌상단 원점(physical px) 변환
+        let x = ((loc.x - bounds.origin.x) * scale) as i32;
+        let y = ((bounds.size.height - (loc.y - bounds.origin.y)) * scale) as i32;
         (x, y)
     }
 }
@@ -485,11 +484,12 @@ pub fn run() {
 
             use tauri::menu::PredefinedMenuItem;
 
-            let show  = MenuItem::with_id(app, "show",  "채팅창 키기", true, None::<&str>)?;
-            let leave = MenuItem::with_id(app, "leave", "방 나가기",   true, None::<&str>)?;
+            let show  = MenuItem::with_id(app, "show",  "채팅창 키기",       true, None::<&str>)?;
+            let reset = MenuItem::with_id(app, "reset", "캐릭터 위치 초기화", true, None::<&str>)?;
+            let leave = MenuItem::with_id(app, "leave", "방 나가기",          true, None::<&str>)?;
             let sep   = PredefinedMenuItem::separator(app)?;
-            let quit  = MenuItem::with_id(app, "quit",  "종료하기",    true, None::<&str>)?;
-            let menu  = Menu::with_items(app, &[&show, &leave, &sep, &quit])?;
+            let quit  = MenuItem::with_id(app, "quit",  "종료하기",           true, None::<&str>)?;
+            let menu  = Menu::with_items(app, &[&show, &reset, &leave, &sep, &quit])?;
 
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -499,6 +499,11 @@ pub fn run() {
                     "show" => {
                         if let Some(w) = app.get_webview_window("main") {
                             let _ = w.emit("open-chat", ());
+                        }
+                    }
+                    "reset" => {
+                        if let Some(w) = app.get_webview_window("overlay") {
+                            let _ = w.emit("reset-positions", ());
                         }
                     }
                     "leave" => {

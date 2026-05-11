@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "devtools"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "devtools"] }
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-single-instance = "2"
@@ -29,6 +29,6 @@ serde_json = "1"
 winapi = { version = "0.3", features = ["winuser", "processthreadsapi", "winbase", "handleapi", "winnt"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication"] }
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication", "NSEvent"] }
 objc2-foundation = { version = "0.3", features = ["NSString"] }
 

@@ -282,6 +282,85 @@ input {
   font-weight: 600;
 }
 
+/* Character taken state */
+.character-btn.taken {
+  opacity: 0.4;
+  cursor: not-allowed;
+  position: relative;
+}
+
+.character-btn.taken .char-select-img {
+  transform: none !important;
+  filter: grayscale(0.6);
+}
+
+.char-taken-badge {
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 100px;
+  letter-spacing: 0.02em;
+}
+
+/* ─── Character Select Screen ─── */
+.char-select-card {
+  width: 460px;
+  padding: 28px 28px 24px;
+}
+
+.char-select-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.char-select-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--accent);
+  letter-spacing: -0.3px;
+}
+
+.char-select-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.char-select-grid {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.char-select-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.char-back-btn {
+  padding: 13px 20px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  transition: all 0.18s;
+  flex-shrink: 0;
+}
+
+.char-back-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.char-confirm-btn {
+  flex: 1;
+  margin-top: 0;
+}
+
 /* Room code row */
 .room-code-row {
   display: flex;

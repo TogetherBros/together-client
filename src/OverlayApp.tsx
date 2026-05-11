@@ -73,7 +73,11 @@ export default function OverlayApp() {
     emitTo('main', 'overlay-ready', {}).catch(console.error);
     const unU = listen<UserState[]>('users-updated', e => setUsers(e.payload));
     const unB = listen<Record<string, string>>('bubble-updated', e => setBubbleMessages(e.payload));
-    return () => { unU.then(f => f()); unB.then(f => f()); };
+    const unR = listen('reset-positions', () => {
+      sessionStorage.removeItem('together-positions');
+      setPositions({});
+    });
+    return () => { unU.then(f => f()); unB.then(f => f()); unR.then(f => f()); };
   }, []);
 
   return (

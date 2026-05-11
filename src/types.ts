@@ -1,4 +1,4 @@
-export type Character = 'CAT' | 'DOG' | 'BUNNY' | 'BEAR' | 'BIRD' | 'BEE' | 'MONKEY' | 'KOALA';
+export type Character = 'CAT' | 'DOG' | 'BUNNY' | 'BEAR' | 'BIRD' | 'BEE' | 'MONKEY' | 'KOALA' | 'KAKATU' | 'DOLPHIN';
 
 export interface UserState {
   userId: string;
@@ -31,4 +31,4 @@ export interface RoomConfig {
   joinedAt: number;
 }
 
-export type AppScreen = 'splash' | 'lobby' | 'overlay' | 'chat';
+export type AppScreen = 'splash' | 'lobby' | 'character-select' | 'overlay' | 'chat';

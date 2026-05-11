@@ -3,10 +3,11 @@ import { flushSync } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emitTo } from '@tauri-apps/api/event';
 import { check } from '@tauri-apps/plugin-updater';
-import { AppScreen, RoomConfig, UserState } from './types';
+import { AppScreen, Character, RoomConfig, UserState } from './types';
 import { useRoom } from './hooks/useRoom';
 import SplashScreen from './components/SplashScreen';
 import LobbyScreen from './components/LobbyScreen';
+import CharacterSelectScreen from './components/CharacterSelectScreen';
 import ChatScreen from './components/ChatScreen';
 import './App.css';
 
@@ -29,7 +30,7 @@ function App() {
   const screenRef = useRef(screen);
   screenRef.current = screen;
 
-  const { users, messages, bubbleMessages, error, activityRef, sendChat, sendActivity } =
+  const { users, messages, bubbleMessages, error, activityRef, takenCharacters, sendChat, sendActivity, joinWithCharacter } =
     useRoom(config);
 
   const usersRef = useRef<UserState[]>(users);
@@ -113,13 +114,22 @@ function App() {
     }
   };
 
-  const handleJoin = async (c: Omit<RoomConfig, 'deviceId' | 'joinedAt'>) => {
+  const handleJoin = (c: Omit<RoomConfig, 'deviceId' | 'joinedAt'>) => {
     setLobbyError(null);
     const full: RoomConfig = { ...c, deviceId, joinedAt: Date.now() };
-    setConfig(full);
+    setConfig(full); // WebSocket 연결 시작 (캐릭터 현황 확인용)
+    setScreen('character-select');
+  };
+
+  const handleCharacterConfirm = async (character: Character) => {
+    joinWithCharacter(character);
     const overlayAvailable = await invoke<boolean>('enter_overlay').catch(() => false);
-    // Linux 등 오버레이 미지원 환경은 채팅 화면으로 대체
     setScreen(overlayAvailable ? 'overlay' : 'chat');
+  };
+
+  const handleCharacterBack = () => {
+    setConfig(null);
+    setScreen('lobby');
   };
 
   const handleLeave = async () => {
@@ -163,6 +173,13 @@ function App() {
     <div className="app">
       {screen === 'splash' && <SplashScreen />}
       {screen === 'lobby' && <LobbyScreen onJoin={handleJoin} errorMessage={lobbyError} />}
+      {screen === 'character-select' && (
+        <CharacterSelectScreen
+          takenCharacters={takenCharacters}
+          onConfirm={handleCharacterConfirm}
+          onBack={handleCharacterBack}
+        />
+      )}
       {screen === 'lobby' && updateInfo && (
         <div className="update-banner">
           {updateState === 'done' ? (
