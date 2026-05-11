@@ -507,6 +507,7 @@ pub fn run() {
             let state_for_tray = shared_state.clone();
             TrayIconBuilder::with_id(TRAY_ID)
                 .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("Together")
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(move |app, event| {
