@@ -64,6 +64,8 @@ export function useRoom(config: RoomConfig | null): RoomState {
     const client = new Client({
       brokerURL: 'wss://api.togetherbros.uk/ws',
       reconnectDelay: 3000,
+      heartbeatIncoming: 10000,
+      heartbeatOutgoing: 10000,
       onWebSocketError: () => {
         if (errorTimer) return;
         errorTimer = setTimeout(() => {
