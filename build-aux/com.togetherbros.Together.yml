@@ -28,15 +28,12 @@ modules:
     build-options:
       env:
         CARGO_HOME: /run/build/together/cargo
-        npm_config_cache: /run/build/together/npm-cache
-        npm_config_offline: 'true'
     build-commands:
       - mkdir -p .cargo
       - echo '[source.crates-io]' > .cargo/config.toml
       - echo 'replace-with = "vendored-sources"' >> .cargo/config.toml
       - echo '[source.vendored-sources]' >> .cargo/config.toml
       - echo 'directory = "vendor"' >> .cargo/config.toml
-      - npm ci --ignore-scripts
       - npm run build
       - cargo build --release --manifest-path src-tauri/Cargo.toml
       - install -Dm755 src-tauri/target/release/together-fe /app/bin/together
@@ -49,5 +46,12 @@ modules:
     sources:
       - type: dir
         path: ..
+        skip:
+          - node_modules
+          - target
+          - .git
+      - type: archive
+        path: node-modules.tar.gz
+        dest: .
+        strip-components: 0
       - cargo-sources.json
-      - node-sources.json

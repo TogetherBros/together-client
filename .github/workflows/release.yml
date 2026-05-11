@@ -77,20 +77,16 @@ jobs:
       - name: Python 도구 설치
         run: pip3 install aiohttp toml tomlkit
 
-      - name: package-lock.json 확보
-        run: npm install
+      - name: npm 설치 및 node_modules 번들
+        run: |
+          npm install
+          tar czf build-aux/node-modules.tar.gz node_modules/
 
       - name: cargo-sources.json 생성
         run: |
           curl -fsSL https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py \
             -o /tmp/flatpak-cargo-generator.py
           python3 /tmp/flatpak-cargo-generator.py src-tauri/Cargo.lock -o build-aux/cargo-sources.json
-
-      - name: node-sources.json 생성
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/node/flatpak-node-generator.py \
-            -o /tmp/flatpak-node-generator.py
-          python3 /tmp/flatpak-node-generator.py npm package-lock.json -o build-aux/node-sources.json
 
       - name: Flatpak 런타임 캐시
         uses: actions/cache@v4
@@ -102,7 +98,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .flatpak-builder
-          key: flatpak-builder-${{ hashFiles('build-aux/com.togetherbros.Together.yml', 'src-tauri/Cargo.lock', 'package-lock.json') }}
+          key: flatpak-builder-${{ hashFiles('build-aux/com.togetherbros.Together.yml', 'src-tauri/Cargo.lock', 'package.json') }}
 
       - name: Flatpak 도구 설치
         run: |
