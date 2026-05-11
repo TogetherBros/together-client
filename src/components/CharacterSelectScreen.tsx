@@ -25,21 +25,53 @@ function TitlebarButtons() {
 }
 
 interface Props {
+  roomCode: string;
   takenCharacters: Character[];
+  characterError?: string | null;
+  onClearError?: () => void;
   onConfirm: (character: Character) => void;
   onBack: () => void;
 }
 
-export default function CharacterSelectScreen({ takenCharacters, onConfirm, onBack }: Props) {
+export default function CharacterSelectScreen({ roomCode, takenCharacters, characterError, onClearError, onConfirm, onBack }: Props) {
   const [selected, setSelected] = useState<Character | null>(null);
-  const takenSet = new Set(takenCharacters);
+  const [serverTaken, setServerTaken] = useState<Set<Character>>(new Set());
+  const [confirming, setConfirming] = useState(false);
 
-  // 선택한 캐릭터가 입장 중에 다른 유저에게 선점되면 선택 해제
+  // 진입 시 서버에서 현재 선택된 캐릭터 목록 조회
+  useEffect(() => {
+    fetch(`https://api.togetherbros.uk/api/room/${roomCode}/characters`)
+      .then(r => r.json())
+      .then((chars: Character[]) => setServerTaken(new Set(chars)))
+      .catch(() => {});
+  }, [roomCode]);
+
+  const takenSet = new Set([...takenCharacters, ...serverTaken]);
+
+  // 선택한 캐릭터가 다른 유저에게 선점되면 선택 해제
   useEffect(() => {
     if (selected && takenSet.has(selected)) {
       setSelected(null);
     }
-  }, [takenCharacters]);
+  }, [takenCharacters, serverTaken]);
+
+  // 에러 발생 시 confirming 해제
+  useEffect(() => {
+    if (characterError) setConfirming(false);
+  }, [characterError]);
+
+  const handleSelect = (type: Character) => {
+    if (takenSet.has(type)) return;
+    setSelected(type);
+    onClearError?.();
+  };
+
+  const handleConfirm = async () => {
+    if (!selected || confirming) return;
+    setConfirming(true);
+    await onConfirm(selected);
+    setConfirming(false);
+  };
 
   return (
     <div className="lobby">
@@ -60,7 +92,7 @@ export default function CharacterSelectScreen({ takenCharacters, onConfirm, onBa
               <button
                 key={type}
                 className={`character-btn${isSelected ? ' selected' : ''}${isTaken ? ' taken' : ''}`}
-                onClick={() => { if (!isTaken) setSelected(type); }}
+                onClick={() => handleSelect(type)}
                 disabled={isTaken}
                 title={isTaken ? '이미 사용 중인 캐릭터입니다' : label}
               >
@@ -77,14 +109,18 @@ export default function CharacterSelectScreen({ takenCharacters, onConfirm, onBa
           })}
         </div>
 
+        {characterError && (
+          <p className="char-error-msg">{characterError}</p>
+        )}
+
         <div className="char-select-actions">
-          <button className="char-back-btn" onClick={onBack}>뒤로</button>
+          <button className="char-back-btn" onClick={onBack} disabled={confirming}>뒤로</button>
           <button
             className="join-btn char-confirm-btn"
-            onClick={() => { if (selected) onConfirm(selected); }}
-            disabled={!selected}
+            onClick={handleConfirm}
+            disabled={!selected || confirming}
           >
-            입장하기
+            {confirming ? '입장 중...' : '입장하기'}
           </button>
         </div>
       </div>
