@@ -6,9 +6,10 @@ interface Props {
   index: number;
   position: { x: number; y: number };
   bubbleMessage?: string;
+  scale?: number;
 }
 
-export default function CharacterCard({ user, index, position, bubbleMessage }: Props) {
+export default function CharacterCard({ user, index, position, bubbleMessage, scale = 1 }: Props) {
   const { x, y } = position;
 
   // bubbleMessage(채팅)가 있으면 타이핑 점 대신 채팅 내용 우선 표시
@@ -21,7 +22,7 @@ export default function CharacterCard({ user, index, position, bubbleMessage }: 
       className="character-pos"
       style={{ transform: `translate(${x}px, ${y}px)` }}
     >
-      <div className="character-card" style={{ animationDelay: `${index * 0.4}s` }}>
+      <div className="character-card" style={{ animationDelay: `${index * 0.4}s`, transform: `scale(${scale})`, transformOrigin: 'bottom center' }}>
         {showBubble && (
           <div className={`speech-bubble${bubbleMessage ? ' speech-bubble-chat' : ''}${isTyping ? ' speech-bubble-typing' : ''}`}>
             {isTyping ? (

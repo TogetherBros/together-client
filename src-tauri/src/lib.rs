@@ -323,13 +323,19 @@ fn update_overlay_users(
     user_ids: Vec<String>,
     user_labels: Vec<String>,
 ) {
-    {
+    let changed = {
         let mut s = state.lock().unwrap();
-        s.hidden_users.retain(|id| user_ids.contains(id));
-        s.tray_user_ids = user_ids;
-        s.tray_user_labels = user_labels;
+        let changed = s.tray_user_ids != user_ids || s.tray_user_labels != user_labels;
+        if changed {
+            s.hidden_users.retain(|id| user_ids.contains(id));
+            s.tray_user_ids = user_ids;
+            s.tray_user_labels = user_labels;
+        }
+        changed
+    };
+    if changed {
+        rebuild_tray(&app, &state);
     }
-    rebuild_tray(&app, &state);
 }
 
 #[tauri::command]

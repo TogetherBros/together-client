@@ -27,14 +27,16 @@ export default function OverlayApp() {
 
   const usersRef = useRef<UserState[]>([]);
   const positionsRef = useRef<Record<string, Position>>({});
+  const hiddenUsersRef = useRef<Set<string>>(new Set());
 
   useEffect(() => { usersRef.current = users; }, [users]);
   useEffect(() => { positionsRef.current = positions; }, [positions]);
+  useEffect(() => { hiddenUsersRef.current = hiddenUsers; }, [hiddenUsers]);
 
-  // Report zone coords to Rust every 50ms (hidden users excluded from drag zones)
+  // Report zone coords to Rust every 50ms
   useEffect(() => {
     const id = setInterval(() => {
-      const us = usersRef.current.filter(u => !hiddenUsers.has(u.userId));
+      const us = usersRef.current.filter(u => !hiddenUsersRef.current.has(u.userId));
       if (us.length === 0) return;
       const dpr = window.devicePixelRatio || 1;
       const ox = Math.round(window.screenX * dpr);
@@ -48,11 +50,10 @@ export default function OverlayApp() {
           Math.round(160 * dpr),
         ];
       });
-      const userIds = us.map(u => u.userId);
-      invoke('update_character_zones', { zones, userIds }).catch(() => {});
+      invoke('update_character_zones', { zones, userIds: us.map(u => u.userId) }).catch(() => {});
     }, 50);
     return () => clearInterval(id);
-  }, [hiddenUsers]);
+  }, []);
 
   // Drag-move events from Rust
   useEffect(() => {
@@ -92,23 +93,14 @@ export default function OverlayApp() {
   return (
     <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', background: 'transparent', overflow: 'hidden' }}>
       {visibleUsers.map((user, i) => (
-        <div
+        <CharacterCard
           key={user.userId}
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            transformOrigin: 'bottom center',
-            transform: `scale(${scale})`,
-          }}
-        >
-          <CharacterCard
-            user={user}
-            index={i}
-            position={positions[user.userId] ?? getCharacterPosition(i, visibleUsers.length)}
-            bubbleMessage={bubbleMessages[user.userId]}
-          />
-        </div>
+          user={user}
+          index={i}
+          position={positions[user.userId] ?? getCharacterPosition(i, visibleUsers.length)}
+          bubbleMessage={bubbleMessages[user.userId]}
+          scale={scale}
+        />
       ))}
     </div>
   );
