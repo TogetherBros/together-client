@@ -33,7 +33,7 @@ function App() {
   const screenRef = useRef(screen);
   screenRef.current = screen;
 
-  const { users, messages, bubbleMessages, error, characterError, clearCharacterError, activityRef, takenCharacters, sendChat, sendActivity, joinWithCharacter } =
+  const { users, messages, bubbleMessages, error, characterError, clearCharacterError, activityRef, takenCharacters, isConnected, sendChat, sendActivity, joinWithCharacter } =
     useRoom(config);
 
   const usersRef = useRef<UserState[]>(users);
@@ -190,6 +190,7 @@ function App() {
           onClearError={clearCharacterError}
           onConfirm={handleCharacterConfirm}
           onBack={handleCharacterBack}
+          isConnected={isConnected}
         />
       )}
       {screen === 'lobby' && updateInfo && (

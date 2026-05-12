@@ -31,9 +31,10 @@ interface Props {
   onClearError?: () => void;
   onConfirm: (character: Character) => void;
   onBack: () => void;
+  isConnected?: boolean;
 }
 
-export default function CharacterSelectScreen({ roomCode, takenCharacters, characterError, onClearError, onConfirm, onBack }: Props) {
+export default function CharacterSelectScreen({ roomCode, takenCharacters, characterError, onClearError, onConfirm, onBack, isConnected = true }: Props) {
   const [selected, setSelected] = useState<Character | null>(null);
   const [serverTaken, setServerTaken] = useState<Set<Character>>(new Set());
   const [confirming, setConfirming] = useState(false);
@@ -118,9 +119,9 @@ export default function CharacterSelectScreen({ roomCode, takenCharacters, chara
           <button
             className="join-btn char-confirm-btn"
             onClick={handleConfirm}
-            disabled={!selected || confirming}
+            disabled={!selected || confirming || !isConnected}
           >
-            {confirming ? '입장 중...' : '입장하기'}
+            {confirming ? '입장 중...' : !isConnected ? '연결 중...' : '입장하기'}
           </button>
         </div>
       </div>

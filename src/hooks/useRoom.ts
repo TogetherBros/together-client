@@ -15,6 +15,7 @@ export interface RoomState {
   clearCharacterError: () => void;
   activityRef: MutableRefObject<string>;
   takenCharacters: Character[];
+  isConnected: boolean;
   sendChat: (text: string) => void;
   sendActivity: (activity: string) => void;
   joinWithCharacter: (character: Character) => Promise<boolean>;
@@ -26,14 +27,15 @@ export function useRoom(config: RoomConfig | null): RoomState {
   const [bubbleMessages, setBubbleMessages] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [characterError, setCharacterError] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
 
   const clientRef = useRef<Client | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activityRef = useRef('접속 중');
   const charRef = useRef<Character | null>(null);
   const hasJoinedRef = useRef(false);
-  const configRef = useRef(config);
   const joinResolverRef = useRef<((success: boolean) => void) | null>(null);
+  const configRef = useRef(config);
   configRef.current = config;
 
   useEffect(() => {
@@ -43,10 +45,13 @@ export function useRoom(config: RoomConfig | null): RoomState {
       setBubbleMessages({});
       setError(null);
       setCharacterError(null);
+      setIsConnected(false);
       charRef.current = null;
       hasJoinedRef.current = false;
       return;
     }
+
+    setIsConnected(false);
 
     charRef.current = null;
     hasJoinedRef.current = false;
@@ -82,28 +87,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
       },
       onConnect: () => {
         if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
-
-        // full sync: 입장 성공 시 서버가 개인 큐로 전송
-        client.subscribe('/user/queue/room-sync', (msg) => {
-          const received: UserState[] = JSON.parse(msg.body);
-          setUsers(received);
-          if (joinResolverRef.current) {
-            joinResolverRef.current(true);
-            joinResolverRef.current = null;
-          }
-        });
-
-        // 캐릭터 중복 에러
-        client.subscribe('/user/queue/character-error', (msg) => {
-          setCharacterError(msg.body);
-          hasJoinedRef.current = false;
-          charRef.current = null;
-          if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-          if (joinResolverRef.current) {
-            joinResolverRef.current(false);
-            joinResolverRef.current = null;
-          }
-        });
+        setIsConnected(true);
 
         // delta: 신규 유저 입장
         client.subscribe(`/topic/room/${roomCode}/join`, (msg) => {
@@ -143,11 +127,13 @@ export function useRoom(config: RoomConfig | null): RoomState {
           }, 3500);
         });
 
-        client.subscribe('/user/queue/error', (msg) => {
-          setError(msg.body);
-        });
-
+        // 재연결 시 재입장
         if (hasJoinedRef.current && charRef.current) {
+          const syncId = crypto.randomUUID();
+          const syncSub = client.subscribe(`/topic/join-sync/${syncId}`, (msg) => {
+            setUsers(JSON.parse(msg.body));
+            syncSub.unsubscribe();
+          });
           client.publish({
             destination: `/app/room/${roomCode}/join`,
             body: JSON.stringify({
@@ -155,6 +141,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
               nickname,
               character: charRef.current,
               activity: activityRef.current,
+              syncId,
             }),
           });
           startInterval(client);
@@ -180,14 +167,45 @@ export function useRoom(config: RoomConfig | null): RoomState {
   }, [config]);
 
   const joinWithCharacter = (character: Character): Promise<boolean> => {
-    charRef.current = character;
-    hasJoinedRef.current = true;
     const client = clientRef.current;
     const cfg = configRef.current;
     if (!client?.connected || !cfg) return Promise.resolve(false);
 
+    charRef.current = character;
+    hasJoinedRef.current = true;
+
     return new Promise((resolve) => {
       joinResolverRef.current = resolve;
+
+      const syncId = crypto.randomUUID();
+
+      const syncSub = client.subscribe(`/topic/join-sync/${syncId}`, (msg) => {
+        setUsers(JSON.parse(msg.body));
+        syncSub.unsubscribe();
+        errorSub.unsubscribe();
+        if (joinResolverRef.current === resolve) {
+          joinResolverRef.current = null;
+          resolve(true);
+        }
+      });
+
+      const errorSub = client.subscribe(`/topic/join-error/${syncId}`, (msg) => {
+        const errMsg: string = msg.body;
+        syncSub.unsubscribe();
+        errorSub.unsubscribe();
+        if (errMsg.includes('캐릭터')) {
+          setCharacterError(errMsg);
+          hasJoinedRef.current = false;
+          charRef.current = null;
+          if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+        } else {
+          setError(errMsg);
+        }
+        if (joinResolverRef.current === resolve) {
+          joinResolverRef.current = null;
+          resolve(false);
+        }
+      });
 
       client.publish({
         destination: `/app/room/${cfg.roomCode}/join`,
@@ -196,10 +214,10 @@ export function useRoom(config: RoomConfig | null): RoomState {
           nickname: cfg.nickname,
           character,
           activity: activityRef.current,
+          syncId,
         }),
       });
 
-      // activity 인터벌은 join 성공 후 room-sync 핸들러에서 시작
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = setInterval(() => {
         if (client.connected) {
@@ -210,9 +228,10 @@ export function useRoom(config: RoomConfig | null): RoomState {
         }
       }, 3000);
 
-      // 5초 내 서버 응답 없으면 타임아웃 처리
       setTimeout(() => {
         if (joinResolverRef.current === resolve) {
+          syncSub.unsubscribe();
+          errorSub.unsubscribe();
           joinResolverRef.current = null;
           resolve(false);
         }
@@ -250,5 +269,5 @@ export function useRoom(config: RoomConfig | null): RoomState {
 
   const clearCharacterError = () => setCharacterError(null);
 
-  return { users, messages, bubbleMessages, error, characterError, clearCharacterError, activityRef, takenCharacters, sendChat, sendActivity, joinWithCharacter };
+  return { users, messages, bubbleMessages, error, characterError, clearCharacterError, activityRef, takenCharacters, isConnected, sendChat, sendActivity, joinWithCharacter };
 }
