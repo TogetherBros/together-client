@@ -46,9 +46,12 @@ function App() {
   const playNotification = useNotificationSound();
   const msgCountRef = useRef(0);
   useEffect(() => {
-    if (messages.length > msgCountRef.current) playNotification();
+    if (messages.length > msgCountRef.current) {
+      const last = messages[messages.length - 1];
+      if (last && last.userId !== config?.deviceId) playNotification();
+    }
     msgCountRef.current = messages.length;
-  }, [messages, playNotification]);
+  }, [messages, playNotification, config]);
 
   // 스플래시 타임아웃
   useEffect(() => {

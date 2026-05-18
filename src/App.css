@@ -695,6 +695,7 @@ html.char-mode #root {
   user-select: none;
   -webkit-user-select: none;
   overflow: visible;
+  pointer-events: none; /* 투명 영역 클릭 투과 — char-content만 auto */
 }
 
 .char-content {
