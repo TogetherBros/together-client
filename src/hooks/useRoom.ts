@@ -18,7 +18,7 @@ export interface RoomState {
   isConnected: boolean;
   sendChat: (text: string) => void;
   sendActivity: (activity: string) => void;
-  joinWithCharacter: (character: Character) => Promise<boolean>;
+  joinWithCharacter: (character: Character) => Promise<UserState[] | null>;
 }
 
 export function useRoom(config: RoomConfig | null): RoomState {
@@ -34,7 +34,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
   const activityRef = useRef('접속 중');
   const charRef = useRef<Character | null>(null);
   const hasJoinedRef = useRef(false);
-  const joinResolverRef = useRef<((success: boolean) => void) | null>(null);
+  const joinResolverRef = useRef<((users: UserState[] | null) => void) | null>(null);
   const configRef = useRef(config);
   configRef.current = config;
 
@@ -166,10 +166,10 @@ export function useRoom(config: RoomConfig | null): RoomState {
     };
   }, [config]);
 
-  const joinWithCharacter = (character: Character): Promise<boolean> => {
+  const joinWithCharacter = (character: Character): Promise<UserState[] | null> => {
     const client = clientRef.current;
     const cfg = configRef.current;
-    if (!client?.connected || !cfg) return Promise.resolve(false);
+    if (!client?.connected || !cfg) return Promise.resolve(null);
 
     charRef.current = character;
     hasJoinedRef.current = true;
@@ -180,12 +180,13 @@ export function useRoom(config: RoomConfig | null): RoomState {
       const syncId = crypto.randomUUID();
 
       const syncSub = client.subscribe(`/topic/join-sync/${syncId}`, (msg) => {
-        setUsers(JSON.parse(msg.body));
+        const userList = JSON.parse(msg.body) as UserState[];
+        setUsers(userList);
         syncSub.unsubscribe();
         errorSub.unsubscribe();
         if (joinResolverRef.current === resolve) {
           joinResolverRef.current = null;
-          resolve(true);
+          resolve(userList);
         }
       });
 
@@ -203,7 +204,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
         }
         if (joinResolverRef.current === resolve) {
           joinResolverRef.current = null;
-          resolve(false);
+          resolve(null);
         }
       });
 
@@ -233,7 +234,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
           syncSub.unsubscribe();
           errorSub.unsubscribe();
           joinResolverRef.current = null;
-          resolve(false);
+          resolve(null);
         }
       }, 5000);
     });

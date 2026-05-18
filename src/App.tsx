@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { listen, emitTo } from '@tauri-apps/api/event';
+import { listen, emit } from '@tauri-apps/api/event';
 import { check } from '@tauri-apps/plugin-updater';
 import { AppScreen, Character, RoomConfig, UserState } from './types';
 import { characterMeta } from './characters';
+import { getWindowPosition } from './utils/position';
 import { useRoom } from './hooks/useRoom';
 
 const charLabelMap = Object.fromEntries(characterMeta.map(c => [c.type, c.label]));
@@ -81,30 +82,44 @@ function App() {
     return () => clearInterval(interval);
   }, [config, activityRef]);
 
-  // overlay로 유저 목록 전송 + 트레이 유저 리스트 동기화
+  // 캐릭터 창 동기화 + 유저 목록 브로드캐스트 + 트레이 동기화
   useEffect(() => {
     if (!config || screen === 'splash' || screen === 'lobby' || screen === 'character-select') return;
-    if (users.length === 0) return; // 재연결 중 빈 목록으로 오버레이/트레이 초기화 방지
-    emitTo('overlay', 'users-updated', users).catch(console.error);
+    if (users.length === 0) return;
+
+    const usersJson = JSON.stringify(users);
+    if (screen === 'overlay') {
+      const positions = users.map((_u, i) => getWindowPosition(i, users.length));
+      // usersJson을 직접 전달 — store_users_json 타이밍 의존성 제거
+      invoke('sync_char_windows', {
+        userIds: users.map((u: UserState) => u.userId),
+        positions,
+        usersJson,
+      }).catch(console.error);
+    } else {
+      invoke('store_users_json', { json: usersJson }).catch(console.error);
+    }
+
+    emit('users-updated', users).catch(console.error);
     invoke('update_overlay_users', {
       userIds: users.map((u: UserState) => u.userId),
       userLabels: users.map((u: UserState) => `${u.nickname} (${charLabelMap[u.character] ?? u.character})`),
     }).catch(console.error);
   }, [users, config, screen]);
 
-  // overlay로 말풍선 전송
+  // 말풍선 브로드캐스트
   useEffect(() => {
     if (!config || screen === 'splash' || screen === 'lobby') return;
-    emitTo('overlay', 'bubble-updated', bubbleMessages).catch(console.error);
+    emit('bubble-updated', bubbleMessages).catch(console.error);
   }, [bubbleMessages, config, screen]);
 
-  // overlay 준비 완료 → 최신 상태 즉시 전송 (항상 활성)
+  // 캐릭터 창 준비 완료 → 최신 상태 즉시 전송
   useEffect(() => {
-    const unlisten = listen('overlay-ready', () => {
+    const unlisten = listen('char-ready', () => {
       const s = screenRef.current;
       if (s === 'splash' || s === 'lobby') return;
-      emitTo('overlay', 'users-updated', usersRef.current).catch(console.error);
-      emitTo('overlay', 'bubble-updated', bubbleRef.current).catch(console.error);
+      emit('users-updated', usersRef.current).catch(console.error);
+      emit('bubble-updated', bubbleRef.current).catch(console.error);
     });
     return () => { unlisten.then(f => f()); };
   }, [deviceId]);
@@ -130,10 +145,16 @@ function App() {
   };
 
   const handleCharacterConfirm = async (character: Character) => {
-    const success = await joinWithCharacter(character);
-    if (!success) return; // 캐릭터 중복 or 타임아웃 → CharacterSelectScreen에서 에러 표시
-    const overlayAvailable = await invoke<boolean>('enter_overlay').catch(() => false);
+    const newUsers = await joinWithCharacter(character);
+    if (!newUsers) return;
+    const positions = newUsers.map((_u, i) => getWindowPosition(i, newUsers.length));
+    const overlayAvailable = await invoke<boolean>('sync_char_windows', {
+      userIds: newUsers.map((u: UserState) => u.userId),
+      positions,
+      usersJson: JSON.stringify(newUsers),
+    }).catch(() => false);
     setScreen(overlayAvailable ? 'overlay' : 'chat');
+    if (overlayAvailable) invoke('enter_overlay').catch(() => {});
   };
 
   const handleCharacterBack = () => {

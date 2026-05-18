@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
 use tauri::{Emitter, Manager};
 
 const TRAY_ID: &str = "main";
@@ -9,31 +7,25 @@ const TRAY_ID: &str = "main";
 // ── Shared state ──────────────────────────────────────────────────────────────
 
 struct OverlayState {
-    character_zones: Vec<[i32; 4]>,
-    user_ids: Vec<String>,
-    is_dragging: bool,
-    drag_user_idx: usize,
-    last_drag_pos: (i32, i32),
     drag_enabled: bool,
-    character_size: u8,          // 1=small 2=medium 3=large
+    character_size: u8,
     hidden_users: HashSet<String>,
     tray_user_ids: Vec<String>,
     tray_user_labels: Vec<String>,
+    char_user_ids: Vec<String>,
+    users_json: String,
 }
 
 impl Default for OverlayState {
     fn default() -> Self {
         Self {
-            character_zones: Vec::new(),
-            user_ids: Vec::new(),
-            is_dragging: false,
-            drag_user_idx: 0,
-            last_drag_pos: (0, 0),
             drag_enabled: true,
             character_size: 2,
             hidden_users: HashSet::new(),
             tray_user_ids: Vec::new(),
             tray_user_labels: Vec::new(),
+            char_user_ids: Vec::new(),
+            users_json: "[]".to_string(),
         }
     }
 }
@@ -51,6 +43,58 @@ fn restore_window(app: &tauri::AppHandle) {
         let _ = w.show();
         let _ = w.set_focus();
     }
+}
+
+fn emit_to_char_windows<S: serde::Serialize + Clone>(
+    app: &tauri::AppHandle,
+    state: &SharedState,
+    event: &str,
+    payload: S,
+) {
+    let ids = state.lock().unwrap().char_user_ids.clone();
+    for uid in &ids {
+        if let Some(w) = app.get_webview_window(&format!("char_{}", uid)) {
+            let _ = w.emit(event, payload.clone());
+        }
+    }
+}
+
+fn destroy_char_windows(app: &tauri::AppHandle, state: &SharedState) {
+    let ids = state.lock().unwrap().char_user_ids.clone();
+    for uid in &ids {
+        if let Some(w) = app.get_webview_window(&format!("char_{}", uid)) {
+            let _ = w.destroy();
+        }
+    }
+    state.lock().unwrap().char_user_ids.clear();
+}
+
+fn default_char_positions(app: &tauri::AppHandle, total: usize) -> Vec<(f64, f64)> {
+    let (screen_w, screen_h) = app.get_webview_window("main")
+        .and_then(|w| w.primary_monitor().ok().flatten())
+        .map(|m| {
+            let size = m.size();
+            let sf = m.scale_factor();
+            (size.width as f64 / sf, size.height as f64 / sf)
+        })
+        .unwrap_or((1920.0, 1080.0));
+
+    let window_w = 240.0_f64;
+    let window_h = 280.0_f64;
+    let char_w   = 90.0_f64;
+    let taskbar  = 48.0_f64;
+
+    (0..total).map(|i| {
+        let spacing = if total > 1 {
+            (screen_w - char_w * total as f64) / (total + 1) as f64
+        } else {
+            (screen_w - char_w) / 2.0
+        };
+        let cx = spacing + i as f64 * (char_w + spacing) + char_w / 2.0;
+        let x  = (cx - window_w / 2.0).max(0.0);
+        let y  = (screen_h - taskbar - window_h).max(0.0);
+        (x, y)
+    }).collect()
 }
 
 // ── Tray rebuild ──────────────────────────────────────────────────────────────
@@ -97,249 +141,6 @@ fn rebuild_tray(app: &tauri::AppHandle, state: &SharedState) {
         let _ = tray.set_menu(Some(menu));
     }
 }
-
-// ── Cursor position ───────────────────────────────────────────────────────────
-
-#[cfg(target_os = "windows")]
-fn get_cursor_pos() -> (i32, i32) {
-    use winapi::shared::windef::POINT;
-    use winapi::um::winuser::GetCursorPos;
-    unsafe {
-        let mut pt = POINT { x: 0, y: 0 };
-        GetCursorPos(&mut pt);
-        (pt.x, pt.y)
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn get_cursor_pos() -> (i32, i32) {
-    use objc2_app_kit::NSEvent;
-    #[repr(C)] struct CgPoint { x: f64, y: f64 }
-    #[repr(C)] struct CgSize  { width: f64, height: f64 }
-    #[repr(C)] struct CgRect  { origin: CgPoint, size: CgSize }
-    #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" {
-        fn CGMainDisplayID() -> u32;
-        fn CGDisplayBounds(display: u32) -> CgRect;
-        fn CGDisplayPixelsHigh(display: u32) -> usize;
-    }
-    unsafe {
-        let display = CGMainDisplayID();
-        let bounds  = CGDisplayBounds(display);
-        let scale   = if bounds.size.height > 0.0 {
-            CGDisplayPixelsHigh(display) as f64 / bounds.size.height
-        } else { 1.0 };
-        let loc = NSEvent::mouseLocation();
-        let x = ((loc.x - bounds.origin.x) * scale) as i32;
-        let y = ((bounds.size.height - (loc.y - bounds.origin.y)) * scale) as i32;
-        (x, y)
-    }
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-fn get_cursor_pos() -> (i32, i32) { (0, 0) }
-
-// ── Left mouse button state ───────────────────────────────────────────────────
-
-#[cfg(target_os = "windows")]
-fn is_lmb_down() -> bool {
-    use winapi::um::winuser::GetAsyncKeyState;
-    unsafe { (GetAsyncKeyState(0x01) as u16 & 0x8000) != 0 }
-}
-
-#[cfg(target_os = "macos")]
-fn is_lmb_down() -> bool {
-    use objc2_app_kit::NSEvent;
-    // pressedMouseButtons() 비트0 = 좌클릭. CGEventSourceButtonState보다 신뢰성 높음
-    unsafe { NSEvent::pressedMouseButtons() & 1 != 0 }
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-fn is_lmb_down() -> bool { false }
-
-// ── System cursor (Windows only) ──────────────────────────────────────────────
-
-#[cfg(target_os = "windows")]
-fn set_drag_cursor() {
-    use winapi::um::winuser::{CopyIcon, LoadCursorW, SetSystemCursor};
-    const IDC_HAND: usize = 32649;
-    const OCR_NORMAL: u32 = 32512;
-    unsafe {
-        let hand = LoadCursorW(std::ptr::null_mut(), IDC_HAND as *const u16);
-        if hand.is_null() { return; }
-        let copy = CopyIcon(hand as _) as winapi::shared::windef::HCURSOR;
-        if !copy.is_null() { SetSystemCursor(copy, OCR_NORMAL); }
-    }
-}
-#[cfg(not(target_os = "windows"))]
-fn set_drag_cursor() {}
-
-#[cfg(target_os = "windows")]
-fn restore_drag_cursor() {
-    use winapi::um::winuser::SystemParametersInfoW;
-    const SPI_SETCURSORS: u32 = 0x0057;
-    unsafe { SystemParametersInfoW(SPI_SETCURSORS, 0, std::ptr::null_mut(), 0); }
-}
-#[cfg(not(target_os = "windows"))]
-fn restore_drag_cursor() {}
-
-// ── Drag monitor ──────────────────────────────────────────────────────────────
-
-fn drag_monitor(app: tauri::AppHandle, state: SharedState) {
-    enum Action { None, StartDrag(String), MoveDrag(String, i32, i32), EndDrag(String) }
-
-    loop {
-        thread::sleep(Duration::from_millis(16));
-
-        let Some(overlay) = app.get_webview_window("overlay") else { continue };
-        if !overlay.is_visible().unwrap_or(false) { continue; }
-
-        let (cx, cy) = get_cursor_pos();
-        let lmb = is_lmb_down();
-
-        let action = {
-            let mut s = state.lock().unwrap();
-
-            if !s.drag_enabled {
-                if s.is_dragging && !lmb {
-                    let uid = s.user_ids.get(s.drag_user_idx).cloned().unwrap_or_default();
-                    s.is_dragging = false;
-                    Action::EndDrag(uid)
-                } else {
-                    Action::None
-                }
-            } else if !s.is_dragging && lmb {
-                let idx = s.character_zones.iter().position(|z| {
-                    cx >= z[0] && cx < z[0] + z[2] && cy >= z[1] && cy < z[1] + z[3]
-                });
-                if let Some(i) = idx {
-                    let uid = s.user_ids.get(i).cloned().unwrap_or_default();
-                    s.is_dragging = true;
-                    s.drag_user_idx = i;
-                    s.last_drag_pos = (cx, cy);
-                    Action::StartDrag(uid)
-                } else { Action::None }
-            } else if s.is_dragging {
-                if lmb {
-                    let dx = cx - s.last_drag_pos.0;
-                    let dy = cy - s.last_drag_pos.1;
-                    if dx != 0 || dy != 0 {
-                        let uid = s.user_ids.get(s.drag_user_idx).cloned().unwrap_or_default();
-                        s.last_drag_pos = (cx, cy);
-                        Action::MoveDrag(uid, dx, dy)
-                    } else { Action::None }
-                } else {
-                    let uid = s.user_ids.get(s.drag_user_idx).cloned().unwrap_or_default();
-                    s.is_dragging = false;
-                    Action::EndDrag(uid)
-                }
-            } else { Action::None }
-        };
-
-        match action {
-            Action::StartDrag(uid) => { set_drag_cursor(); let _ = overlay.emit("drag-start", uid); }
-            Action::MoveDrag(uid, dx, dy) => { let _ = overlay.emit("drag-move", (uid, dx, dy)); }
-            Action::EndDrag(uid) => { restore_drag_cursor(); let _ = overlay.emit("drag-end", uid); }
-            Action::None => {}
-        }
-    }
-}
-
-// ── Tauri commands ────────────────────────────────────────────────────────────
-
-#[tauri::command]
-fn show_main_window(app: tauri::AppHandle) { restore_window(&app); }
-
-#[tauri::command]
-fn quit_app(app: tauri::AppHandle) { app.exit(0); }
-
-#[tauri::command]
-fn enter_overlay(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, SharedState>,
-) -> Result<bool, String> {
-    #[cfg(target_os = "linux")]
-    { let _ = (app, state); return Ok(false); }
-
-    #[cfg(not(target_os = "linux"))]
-    {
-        if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
-        if let Some(w) = app.get_webview_window("overlay") {
-            let _ = w.set_ignore_cursor_events(true);
-            let _ = w.show();
-        }
-        let (char_size, hidden_vec) = {
-            let mut s = state.lock().unwrap();
-            s.character_zones.clear();
-            s.user_ids.clear();
-            s.is_dragging = false;
-            let hv: Vec<String> = s.hidden_users.iter().cloned().collect();
-            (s.character_size, hv)
-        };
-        if let Some(w) = app.get_webview_window("overlay") {
-            let _ = w.emit("character-size-changed", char_size);
-            let _ = w.emit("hidden-users-changed", hidden_vec);
-        }
-        Ok(true)
-    }
-}
-
-#[tauri::command]
-fn leave_overlay(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, SharedState>,
-) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("overlay") { let _ = w.hide(); }
-    restore_window(&app);
-    {
-        let mut s = state.lock().unwrap();
-        s.character_zones.clear();
-        s.user_ids.clear();
-        s.is_dragging = false;
-        s.tray_user_ids.clear();
-        s.tray_user_labels.clear();
-    }
-    rebuild_tray(&app, &state);
-    Ok(())
-}
-
-#[tauri::command]
-fn update_character_zones(
-    zones: Vec<Vec<i32>>,
-    user_ids: Vec<String>,
-    state: tauri::State<'_, SharedState>,
-) {
-    let mut s = state.lock().unwrap();
-    s.character_zones = zones.into_iter()
-        .filter_map(|z| if z.len() == 4 { Some([z[0], z[1], z[2], z[3]]) } else { None })
-        .collect();
-    s.user_ids = user_ids;
-}
-
-#[tauri::command]
-fn update_overlay_users(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, SharedState>,
-    user_ids: Vec<String>,
-    user_labels: Vec<String>,
-) {
-    let changed = {
-        let mut s = state.lock().unwrap();
-        let changed = s.tray_user_ids != user_ids || s.tray_user_labels != user_labels;
-        if changed {
-            s.hidden_users.retain(|id| user_ids.contains(id));
-            s.tray_user_ids = user_ids;
-            s.tray_user_labels = user_labels;
-        }
-        changed
-    };
-    if changed {
-        rebuild_tray(&app, &state);
-    }
-}
-
-#[tauri::command]
-fn get_active_app() -> String { get_active_app_internal() }
 
 // ── Active app detection ──────────────────────────────────────────────────────
 
@@ -451,6 +252,208 @@ fn capitalize_first(s: &str) -> String {
     match c.next() { None => String::new(), Some(f) => f.to_uppercase().collect::<String>() + c.as_str() }
 }
 
+// ── Tauri commands ────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn show_main_window(app: tauri::AppHandle) { restore_window(&app); }
+
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) { app.exit(0); }
+
+#[tauri::command]
+fn enter_overlay(app: tauri::AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "linux")]
+    { let _ = app; return Ok(false); }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
+        Ok(true)
+    }
+}
+
+#[tauri::command]
+fn leave_overlay(app: tauri::AppHandle, state: tauri::State<'_, SharedState>) -> Result<(), String> {
+    destroy_char_windows(&app, &state);
+    {
+        let mut s = state.lock().unwrap();
+        s.tray_user_ids.clear();
+        s.tray_user_labels.clear();
+        s.hidden_users.clear();
+    }
+    restore_window(&app);
+    rebuild_tray(&app, &state);
+    Ok(())
+}
+
+fn percent_encode_ascii(s: &str) -> String {
+    s.chars().map(|c| match c {
+        'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
+        _ => format!("%{:02X}", c as u8),
+    }).collect()
+}
+
+// 비ASCII 문자를 \uXXXX로 변환 → initialization_script에서 한국어 인코딩 문제 방지
+fn unicode_escape_json(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for ch in s.chars() {
+        if ch.is_ascii() {
+            out.push(ch);
+        } else {
+            let code = ch as u32;
+            if code <= 0xFFFF {
+                out.push_str(&format!("\\u{:04X}", code));
+            } else {
+                let code = code - 0x10000;
+                let high = 0xD800 + (code >> 10);
+                let low = 0xDC00 + (code & 0x3FF);
+                out.push_str(&format!("\\u{:04X}\\u{:04X}", high, low));
+            }
+        }
+    }
+    out
+}
+
+#[tauri::command]
+async fn sync_char_windows(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SharedState>,
+    user_ids: Vec<String>,
+    positions: Vec<[f64; 2]>,
+    users_json: String,  // JS에서 직접 전달 — Rust 공유 상태 타이밍 문제 완전 제거
+) -> Result<bool, String> {
+    #[cfg(target_os = "linux")]
+    { return Ok(false); }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        // 전달받은 JSON을 공유 상태에도 저장 (get_user_for_window 폴백용)
+        state.lock().unwrap().users_json = users_json.clone();
+
+        let existing_ids = state.lock().unwrap().char_user_ids.clone();
+
+        // Destroy windows for users who left
+        for uid in &existing_ids {
+            if !user_ids.contains(uid) {
+                if let Some(w) = app.get_webview_window(&format!("char_{}", uid)) {
+                    let _ = w.destroy();
+                }
+            }
+        }
+
+        // Create windows for new users — users_json comes directly from JS parameter
+        let users_val: Vec<serde_json::Value> =
+            serde_json::from_str(&users_json).unwrap_or_default();
+        let drag_enabled = state.lock().unwrap().drag_enabled;
+
+        eprintln!("[Together] sync_char_windows: user_ids={:?} users_json_len={} parsed_count={}", user_ids, users_json.len(), users_val.len());
+
+        for (i, uid) in user_ids.iter().enumerate() {
+            if existing_ids.contains(uid) { continue; }
+            let label = format!("char_{}", uid);
+            if app.get_webview_window(&label).is_some() { continue; }
+
+            let pos = positions.get(i).copied().unwrap_or([100.0 + i as f64 * 240.0, 700.0]);
+            let is_hidden = state.lock().unwrap().hidden_users.contains(uid.as_str());
+
+            // Find user data — passed as ?u= query param (percent-encoded JSON)
+            let user_data = users_val.iter()
+                .find(|u| u.get("userId").and_then(|v| v.as_str()) == Some(uid.as_str()))
+                .map(|u| u.to_string())
+                .unwrap_or_else(|| "null".to_string());
+
+            eprintln!("[Together] char 창 생성: label={} user={}", label, &user_data[..user_data.len().min(80)]);
+
+            let escaped = unicode_escape_json(&user_data);
+            let init_script = format!("window.__TAURI_CHAR_USER__={};", escaped);
+            let char_url = format!("char.html?u={}", percent_encode_ascii(&escaped));
+
+            match tauri::WebviewWindowBuilder::new(
+                &app,
+                &label,
+                tauri::WebviewUrl::App(char_url.into()),
+            )
+            .initialization_script(&init_script)
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .shadow(false)
+            .focused(false)
+            .visible(!is_hidden)
+            .position(pos[0], pos[1])
+            .inner_size(240.0, 280.0)
+            .build() {
+                Ok(w) => {
+                    // OS 레벨 클릭 투과: 드래그 비활성 시 창이 클릭을 가로채지 않음
+                    let _ = w.set_ignore_cursor_events(!drag_enabled);
+                    #[cfg(debug_assertions)]
+                    let _ = w.open_devtools();
+                }
+                Err(e) => {
+                    eprintln!("[Together] char 창 생성 실패 '{}': {}", label, e);
+                }
+            }
+        }
+
+        state.lock().unwrap().char_user_ids = user_ids;
+
+        Ok(true)
+    }
+}
+
+#[tauri::command]
+fn update_overlay_users(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SharedState>,
+    user_ids: Vec<String>,
+    user_labels: Vec<String>,
+) {
+    let changed = {
+        let mut s = state.lock().unwrap();
+        let changed = s.tray_user_ids != user_ids || s.tray_user_labels != user_labels;
+        if changed {
+            s.hidden_users.retain(|id| user_ids.contains(id));
+            s.tray_user_ids = user_ids;
+            s.tray_user_labels = user_labels;
+        }
+        changed
+    };
+    if changed {
+        rebuild_tray(&app, &state);
+    }
+}
+
+#[tauri::command]
+fn store_users_json(state: tauri::State<'_, SharedState>, json: String) {
+    eprintln!("[Together] store_users_json: {} chars", json.len());
+    state.lock().unwrap().users_json = json;
+}
+
+#[tauri::command]
+fn get_users_json(state: tauri::State<'_, SharedState>) -> String {
+    state.lock().unwrap().users_json.clone()
+}
+
+#[tauri::command]
+fn get_user_for_window(label: String, state: tauri::State<'_, SharedState>) -> String {
+    let user_id = label.trim_start_matches("char_").to_string();
+    let json = state.lock().unwrap().users_json.clone();
+    let preview: String = json.chars().take(200).collect();
+    eprintln!("[Together] get_user_for_window label={} userId={} json={}", label, user_id, preview);
+    let users: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap_or_default();
+    for user in users {
+        if user.get("userId").and_then(|v| v.as_str()) == Some(user_id.as_str()) {
+            return user.to_string();
+        }
+    }
+    "null".to_string()
+}
+
+#[tauri::command]
+fn get_active_app() -> String { get_active_app_internal() }
+
 // ── App setup ─────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -462,20 +465,6 @@ pub fn run() {
         .setup(move |app| {
             use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
             use tauri::tray::TrayIconBuilder;
-
-            #[cfg(not(target_os = "linux"))]
-            {
-                let app_handle = app.handle().clone();
-                let state_for_thread = shared_state.clone();
-                thread::spawn(move || drag_monitor(app_handle, state_for_thread));
-            }
-
-            #[cfg(not(target_os = "linux"))]
-            tauri::WebviewWindowBuilder::new(app, "overlay", tauri::WebviewUrl::App("index.html".into()))
-                .decorations(false).transparent(true).always_on_top(true)
-                .skip_taskbar(true).maximized(true).resizable(false)
-                .shadow(false).focused(false).visible(false)
-                .build()?;
 
             #[cfg(debug_assertions)]
             if let Some(w) = app.get_webview_window("main") { w.open_devtools(); }
@@ -514,28 +503,55 @@ pub fn run() {
                     match event.id.as_ref() {
                         "show" => {
                             if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.set_focus();
                                 let _ = w.emit("open-chat", ());
                             }
                         }
                         "toggle-drag" => {
-                            { state_for_tray.lock().unwrap().drag_enabled ^= true; }
+                            let enabled = {
+                                let mut s = state_for_tray.lock().unwrap();
+                                s.drag_enabled ^= true;
+                                s.drag_enabled
+                            };
+                            // OS 레벨 클릭 투과 토글
+                            let ids = state_for_tray.lock().unwrap().char_user_ids.clone();
+                            for uid in &ids {
+                                if let Some(w) = app.get_webview_window(&format!("char_{}", uid)) {
+                                    let _ = w.set_ignore_cursor_events(!enabled);
+                                }
+                            }
+                            emit_to_char_windows(app, &state_for_tray, "drag-enabled", enabled);
                             rebuild_tray(app, &state_for_tray);
                         }
                         id @ ("size-1" | "size-2" | "size-3") => {
                             let size: u8 = id.trim_start_matches("size-").parse().unwrap_or(2);
                             { state_for_tray.lock().unwrap().character_size = size; }
-                            if let Some(w) = app.get_webview_window("overlay") {
-                                let _ = w.emit("character-size-changed", size);
-                            }
+                            emit_to_char_windows(app, &state_for_tray, "character-size-changed", size);
                             rebuild_tray(app, &state_for_tray);
                         }
                         "reset" => {
-                            if let Some(w) = app.get_webview_window("overlay") {
-                                let _ = w.emit("reset-positions", ());
+                            let ids = state_for_tray.lock().unwrap().char_user_ids.clone();
+                            let positions = default_char_positions(app, ids.len());
+                            for (i, uid) in ids.iter().enumerate() {
+                                if let Some(w) = app.get_webview_window(&format!("char_{}", uid)) {
+                                    let (px, py) = positions[i];
+                                    let _ = w.set_position(tauri::Position::Logical(
+                                        tauri::LogicalPosition { x: px, y: py },
+                                    ));
+                                }
                             }
                         }
                         "leave" => {
-                            if let Some(w) = app.get_webview_window("overlay") { let _ = w.hide(); }
+                            destroy_char_windows(app, &state_for_tray);
+                            {
+                                let mut s = state_for_tray.lock().unwrap();
+                                s.tray_user_ids.clear();
+                                s.tray_user_labels.clear();
+                                s.hidden_users.clear();
+                            }
+                            rebuild_tray(app, &state_for_tray);
+                            restore_window(app);
                             if let Some(w) = app.get_webview_window("main") {
                                 let _ = w.emit("leave-overlay", ());
                             }
@@ -543,19 +559,20 @@ pub fn run() {
                         "quit" => app.exit(0),
                         id if id.starts_with("vis-") => {
                             let idx: usize = id.trim_start_matches("vis-").parse().unwrap_or(0);
-                            let hidden_vec = {
+                            let (uid_opt, is_now_hidden) = {
                                 let mut s = state_for_tray.lock().unwrap();
                                 if let Some(uid) = s.tray_user_ids.get(idx).cloned() {
-                                    if s.hidden_users.contains(&uid) {
-                                        s.hidden_users.remove(&uid);
-                                    } else {
-                                        s.hidden_users.insert(uid);
-                                    }
-                                }
-                                s.hidden_users.iter().cloned().collect::<Vec<_>>()
+                                    let was_hidden = s.hidden_users.contains(&uid);
+                                    if was_hidden { s.hidden_users.remove(&uid); }
+                                    else { s.hidden_users.insert(uid.clone()); }
+                                    (Some(uid), !was_hidden)
+                                } else { (None, false) }
                             };
-                            if let Some(w) = app.get_webview_window("overlay") {
-                                let _ = w.emit("hidden-users-changed", hidden_vec);
+                            if let Some(uid) = uid_opt {
+                                if let Some(w) = app.get_webview_window(&format!("char_{}", uid)) {
+                                    if is_now_hidden { let _ = w.hide(); }
+                                    else { let _ = w.show(); }
+                                }
                             }
                             rebuild_tray(app, &state_for_tray);
                         }
@@ -568,9 +585,9 @@ pub fn run() {
         })
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
-                let _ = w.emit("open-chat", ());
                 let _ = w.show();
                 let _ = w.set_focus();
+                let _ = w.emit("open-chat", ());
             }
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -580,8 +597,11 @@ pub fn run() {
             quit_app,
             enter_overlay,
             leave_overlay,
-            update_character_zones,
+            sync_char_windows,
             update_overlay_users,
+            store_users_json,
+            get_users_json,
+            get_user_for_window,
             get_active_app,
         ])
         .build(tauri::generate_context!())
@@ -591,9 +611,9 @@ pub fn run() {
             if let tauri::RunEvent::Reopen { has_visible_windows, .. } = &_event {
                 if !has_visible_windows {
                     if let Some(w) = _app.get_webview_window("main") {
-                        let _ = w.emit("open-chat", ());
                         let _ = w.show();
                         let _ = w.set_focus();
+                        let _ = w.emit("open-chat", ());
                     }
                 }
             }
