@@ -7,6 +7,7 @@ import { AppScreen, Character, RoomConfig, UserState } from './types';
 import { characterMeta } from './characters';
 import { getWindowPosition } from './utils/position';
 import { useRoom } from './hooks/useRoom';
+import { useNotificationSound } from './hooks/useNotificationSound';
 
 const charLabelMap = Object.fromEntries(characterMeta.map(c => [c.type, c.label]));
 import SplashScreen from './components/SplashScreen';
@@ -41,6 +42,13 @@ function App() {
   const bubbleRef = useRef<Record<string, string>>(bubbleMessages);
   usersRef.current = users;
   bubbleRef.current = bubbleMessages;
+
+  const playNotification = useNotificationSound();
+  const msgCountRef = useRef(0);
+  useEffect(() => {
+    if (messages.length > msgCountRef.current) playNotification();
+    msgCountRef.current = messages.length;
+  }, [messages, playNotification]);
 
   // 스플래시 타임아웃
   useEffect(() => {

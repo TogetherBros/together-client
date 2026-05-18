@@ -14,6 +14,7 @@ struct OverlayState {
     tray_user_labels: Vec<String>,
     char_user_ids: Vec<String>,
     users_json: String,
+    notifications_muted: bool,
 }
 
 impl Default for OverlayState {
@@ -26,6 +27,7 @@ impl Default for OverlayState {
             tray_user_labels: Vec::new(),
             char_user_ids: Vec::new(),
             users_json: "[]".to_string(),
+            notifications_muted: false,
         }
     }
 }
@@ -102,14 +104,16 @@ fn default_char_positions(app: &tauri::AppHandle, total: usize) -> Vec<(f64, f64
 fn rebuild_tray(app: &tauri::AppHandle, state: &SharedState) {
     use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 
-    let (drag_enabled, char_size, hidden_users, user_ids, user_labels) = {
+    let (drag_enabled, char_size, hidden_users, user_ids, user_labels, muted) = {
         let s = state.lock().unwrap();
         (s.drag_enabled, s.character_size, s.hidden_users.clone(),
-         s.tray_user_ids.clone(), s.tray_user_labels.clone())
+         s.tray_user_ids.clone(), s.tray_user_labels.clone(), s.notifications_muted)
     };
 
     let Ok(show)  = MenuItem::with_id(app, "show",  "채팅창 키기",  true, None::<&str>) else { return };
     let Ok(sep0)  = PredefinedMenuItem::separator(app) else { return };
+    let Ok(mute)  = CheckMenuItem::with_id(app, "mute-notify", "전체 알림 끄기", true, muted, None::<&str>) else { return };
+    let Ok(sep_m) = PredefinedMenuItem::separator(app) else { return };
     let Ok(drag)  = CheckMenuItem::with_id(app, "toggle-drag", "드래그", true, drag_enabled, None::<&str>) else { return };
     let Ok(s_sm)  = CheckMenuItem::with_id(app, "size-1", "작게", true, char_size == 1, None::<&str>) else { return };
     let Ok(s_md)  = CheckMenuItem::with_id(app, "size-2", "보통", true, char_size == 2, None::<&str>) else { return };
@@ -134,10 +138,10 @@ fn rebuild_tray(app: &tauri::AppHandle, state: &SharedState) {
         let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
             checks.iter().map(|c| c as &dyn tauri::menu::IsMenuItem<tauri::Wry>).collect();
         let Ok(v_sub) = Submenu::with_items(app, "캐릭터 보기/숨기기", true, refs.as_slice()) else { return };
-        if let Ok(menu) = Menu::with_items(app, &[&show, &sep0, &drag, &s_sub, &v_sub, &sep1, &reset, &leave, &sep2, &quit]) {
+        if let Ok(menu) = Menu::with_items(app, &[&show, &sep0, &mute, &sep_m, &drag, &s_sub, &v_sub, &sep1, &reset, &leave, &sep2, &quit]) {
             let _ = tray.set_menu(Some(menu));
         }
-    } else if let Ok(menu) = Menu::with_items(app, &[&show, &sep0, &drag, &s_sub, &sep1, &reset, &leave, &sep2, &quit]) {
+    } else if let Ok(menu) = Menu::with_items(app, &[&show, &sep0, &mute, &sep_m, &drag, &s_sub, &sep1, &reset, &leave, &sep2, &quit]) {
         let _ = tray.set_menu(Some(menu));
     }
 }
@@ -481,6 +485,8 @@ pub fn run() {
 
             let show  = MenuItem::with_id(app, "show",  "채팅창 키기",       true, None::<&str>)?;
             let sep0  = PredefinedMenuItem::separator(app)?;
+            let mute  = CheckMenuItem::with_id(app, "mute-notify", "전체 알림 끄기", true, false, None::<&str>)?;
+            let sep_m = PredefinedMenuItem::separator(app)?;
             let drag  = CheckMenuItem::with_id(app, "toggle-drag", "드래그",  true, true,  None::<&str>)?;
             let s_sm  = CheckMenuItem::with_id(app, "size-1", "작게",         true, false, None::<&str>)?;
             let s_md  = CheckMenuItem::with_id(app, "size-2", "보통",         true, true,  None::<&str>)?;
@@ -491,7 +497,7 @@ pub fn run() {
             let leave = MenuItem::with_id(app, "leave", "방 나가기",          true, None::<&str>)?;
             let sep2  = PredefinedMenuItem::separator(app)?;
             let quit  = MenuItem::with_id(app, "quit",  "종료하기",           true, None::<&str>)?;
-            let menu  = Menu::with_items(app, &[&show, &sep0, &drag, &s_sub, &sep1, &reset, &leave, &sep2, &quit])?;
+            let menu  = Menu::with_items(app, &[&show, &sep0, &mute, &sep_m, &drag, &s_sub, &sep1, &reset, &leave, &sep2, &quit])?;
 
             let state_for_tray = shared_state.clone();
             TrayIconBuilder::with_id(TRAY_ID)
@@ -555,6 +561,17 @@ pub fn run() {
                             if let Some(w) = app.get_webview_window("main") {
                                 let _ = w.emit("leave-overlay", ());
                             }
+                        }
+                        "mute-notify" => {
+                            let muted = {
+                                let mut s = state_for_tray.lock().unwrap();
+                                s.notifications_muted ^= true;
+                                s.notifications_muted
+                            };
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.emit("mute-changed", muted);
+                            }
+                            rebuild_tray(app, &state_for_tray);
                         }
                         "quit" => app.exit(0),
                         id if id.starts_with("vis-") => {
