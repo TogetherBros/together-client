@@ -71,7 +71,17 @@ fn destroy_char_windows(app: &tauri::AppHandle, state: &SharedState) {
     state.lock().unwrap().char_user_ids.clear();
 }
 
-fn default_char_positions(app: &tauri::AppHandle, total: usize) -> Vec<(f64, f64)> {
+/// 스케일 레벨별 창 크기 (시각적 콘텐츠 기준으로 최소화)
+/// transform-origin: bottom center 이므로 시각 높이 = DOM높이 × scale
+fn char_window_size(level: u8) -> (f64, f64) {
+    match level {
+        1 => (140.0, 130.0),  // scale 0.7
+        3 => (245.0, 230.0),  // scale 1.35
+        _ => (185.0, 180.0),  // scale 1.0 (기본)
+    }
+}
+
+fn default_char_positions(app: &tauri::AppHandle, total: usize, size_level: u8) -> Vec<(f64, f64)> {
     let (screen_w, screen_h) = app.get_webview_window("main")
         .and_then(|w| w.primary_monitor().ok().flatten())
         .map(|m| {
@@ -81,10 +91,9 @@ fn default_char_positions(app: &tauri::AppHandle, total: usize) -> Vec<(f64, f64
         })
         .unwrap_or((1920.0, 1080.0));
 
-    let window_w = 240.0_f64;
-    let window_h = 280.0_f64;
-    let char_w   = 90.0_f64;
-    let taskbar  = 48.0_f64;
+    let (window_w, window_h) = char_window_size(size_level);
+    let char_w  = 90.0_f64;
+    let taskbar = 48.0_f64;
 
     (0..total).map(|i| {
         let spacing = if total > 1 {
@@ -334,7 +343,10 @@ async fn sync_char_windows(
         // 전달받은 JSON을 공유 상태에도 저장 (get_user_for_window 폴백용)
         state.lock().unwrap().users_json = users_json.clone();
 
-        let existing_ids = state.lock().unwrap().char_user_ids.clone();
+        let (size_level, existing_ids) = {
+            let s = state.lock().unwrap();
+            (s.character_size, s.char_user_ids.clone())
+        };
 
         // Destroy windows for users who left
         for uid in &existing_ids {
@@ -349,6 +361,7 @@ async fn sync_char_windows(
         let users_val: Vec<serde_json::Value> =
             serde_json::from_str(&users_json).unwrap_or_default();
         let drag_enabled = state.lock().unwrap().drag_enabled;
+        let (win_w, win_h) = char_window_size(size_level);
 
         eprintln!("[Together] sync_char_windows: user_ids={:?} users_json_len={} parsed_count={}", user_ids, users_json.len(), users_val.len());
 
@@ -387,7 +400,7 @@ async fn sync_char_windows(
             .focused(false)
             .visible(!is_hidden)
             .position(pos[0], pos[1])
-            .inner_size(240.0, 280.0)
+            .inner_size(win_w, win_h)
             .build() {
                 Ok(w) => {
                     // OS 레벨 클릭 투과: 드래그 비활성 시 창이 클릭을 가로채지 않음
@@ -531,14 +544,43 @@ pub fn run() {
                             rebuild_tray(app, &state_for_tray);
                         }
                         id @ ("size-1" | "size-2" | "size-3") => {
-                            let size: u8 = id.trim_start_matches("size-").parse().unwrap_or(2);
-                            { state_for_tray.lock().unwrap().character_size = size; }
-                            emit_to_char_windows(app, &state_for_tray, "character-size-changed", size);
+                            let new_size: u8 = id.trim_start_matches("size-").parse().unwrap_or(2);
+                            let old_size = {
+                                let mut s = state_for_tray.lock().unwrap();
+                                let old = s.character_size;
+                                s.character_size = new_size;
+                                old
+                            };
+                            let (old_w, old_h) = char_window_size(old_size);
+                            let (new_w, new_h) = char_window_size(new_size);
+                            let ids = state_for_tray.lock().unwrap().char_user_ids.clone();
+                            for uid in &ids {
+                                if let Some(w) = app.get_webview_window(&format!("char_{}", uid)) {
+                                    // 하단 중심 고정: 위치 보정 후 리사이즈
+                                    if let Ok(pos) = w.outer_position() {
+                                        let sf = w.scale_factor().unwrap_or(1.0);
+                                        let lx = pos.x as f64 / sf;
+                                        let ly = pos.y as f64 / sf;
+                                        let new_lx = lx + (old_w - new_w) / 2.0;
+                                        let new_ly = ly + (old_h - new_h);
+                                        let _ = w.set_position(tauri::Position::Logical(
+                                            tauri::LogicalPosition { x: new_lx.max(0.0), y: new_ly.max(0.0) },
+                                        ));
+                                    }
+                                    let _ = w.set_size(tauri::Size::Logical(
+                                        tauri::LogicalSize { width: new_w, height: new_h },
+                                    ));
+                                }
+                            }
+                            emit_to_char_windows(app, &state_for_tray, "character-size-changed", new_size);
                             rebuild_tray(app, &state_for_tray);
                         }
                         "reset" => {
-                            let ids = state_for_tray.lock().unwrap().char_user_ids.clone();
-                            let positions = default_char_positions(app, ids.len());
+                            let (ids, size_level) = {
+                                let s = state_for_tray.lock().unwrap();
+                                (s.char_user_ids.clone(), s.character_size)
+                            };
+                            let positions = default_char_positions(app, ids.len(), size_level);
                             for (i, uid) in ids.iter().enumerate() {
                                 if let Some(w) = app.get_webview_window(&format!("char_{}", uid)) {
                                     let (px, py) = positions[i];
