@@ -18,7 +18,6 @@
         "height": 660,
         "decorations": false,
         "transparent": true,
-        "resizable": false,
         "center": true,
         "devtools": true
       }
