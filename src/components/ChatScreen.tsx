@@ -49,6 +49,7 @@ export default function ChatScreen({
   const [input, setInput] = useState('');
   const [confirmLeave, setConfirmLeave] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const elapsed = useElapsed(config.joinedAt);
 
   useEffect(() => {
@@ -151,8 +152,9 @@ export default function ChatScreen({
         <div ref={bottomRef} />
       </div>
 
-      <div className="chat-input-row">
+      <div className="chat-input-row" onClick={() => inputRef.current?.focus()}>
         <input
+          ref={inputRef}
           className="chat-input"
           type="text"
           placeholder="메시지를 입력하세요..."
