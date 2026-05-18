@@ -545,18 +545,18 @@ pub fn run() {
                         }
                         id @ ("size-1" | "size-2" | "size-3") => {
                             let new_size: u8 = id.trim_start_matches("size-").parse().unwrap_or(2);
-                            let old_size = {
+                            let (old_size, ids, hidden_users) = {
                                 let mut s = state_for_tray.lock().unwrap();
                                 let old = s.character_size;
                                 s.character_size = new_size;
-                                old
+                                (old, s.char_user_ids.clone(), s.hidden_users.clone())
                             };
                             let (old_w, old_h) = char_window_size(old_size);
                             let (new_w, new_h) = char_window_size(new_size);
-                            let ids = state_for_tray.lock().unwrap().char_user_ids.clone();
                             for uid in &ids {
                                 if let Some(w) = app.get_webview_window(&format!("char_{}", uid)) {
-                                    // 하단 중심 고정: 위치 보정 후 리사이즈
+                                    let was_visible = !hidden_users.contains(uid.as_str());
+                                    if was_visible { let _ = w.hide(); }
                                     if let Ok(pos) = w.outer_position() {
                                         let sf = w.scale_factor().unwrap_or(1.0);
                                         let lx = pos.x as f64 / sf;
@@ -570,6 +570,7 @@ pub fn run() {
                                     let _ = w.set_size(tauri::Size::Logical(
                                         tauri::LogicalSize { width: new_w, height: new_h },
                                     ));
+                                    if was_visible { let _ = w.show(); }
                                 }
                             }
                             emit_to_char_windows(app, &state_for_tray, "character-size-changed", new_size);
