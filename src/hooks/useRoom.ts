@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, MutableRefObject } from 'react';
 import { Client } from '@stomp/stompjs';
-import { Character, UserState, ChatMessage, RoomConfig } from '../types';
+import { Character, UserState, ChatMessage, RoomConfig, GameState, GameEvent, GameType } from '../types';
 
 const ALL_CHARACTERS: Character[] = ['DOG', 'CAT', 'BUNNY', 'BEAR', 'BIRD', 'BEE', 'MONKEY', 'KOALA', 'KAKATU', 'DOLPHIN'];
 
@@ -16,9 +16,13 @@ export interface RoomState {
   activityRef: MutableRefObject<string>;
   takenCharacters: Character[];
   isConnected: boolean;
+  gameState: GameState | null;
   sendChat: (text: string) => void;
   sendActivity: (activity: string) => void;
   joinWithCharacter: (character: Character) => Promise<UserState[] | null>;
+  startGame: (type: GameType) => void;
+  joinGame: (gameId: string) => void;
+  submitWord: (word: string) => void;
 }
 
 export function useRoom(config: RoomConfig | null): RoomState {
@@ -28,6 +32,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
   const [error, setError] = useState<string | null>(null);
   const [characterError, setCharacterError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [gameState, setGameState] = useState<GameState | null>(null);
 
   const clientRef = useRef<Client | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -46,6 +51,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
       setError(null);
       setCharacterError(null);
       setIsConnected(false);
+      setGameState(null);
       charRef.current = null;
       hasJoinedRef.current = false;
       return;
@@ -111,6 +117,41 @@ export function useRoom(config: RoomConfig | null): RoomState {
         client.subscribe(`/topic/room/${roomCode}/activity`, (msg) => {
           const { userId, activity } = JSON.parse(msg.body) as { userId: string; activity: string };
           setUsers(prev => prev.map(u => u.userId === userId ? { ...u, activity } : u));
+        });
+
+        // game events
+        client.subscribe(`/topic/room/${roomCode}/game`, (msg) => {
+          const event: GameEvent = JSON.parse(msg.body);
+          const sentAt = new Date().toISOString();
+
+          if (event.eventType === 'GAME_CREATED') {
+            setGameState(event);
+            setMessages(prev => [...prev, {
+              userId: event.hostId, nickname: event.hostNickname,
+              character: 'DOG', message: '', sentAt,
+              msgType: 'game-invite',
+              gameData: { gameId: event.gameId },
+            }]);
+          } else if (event.eventType === 'PLAYER_JOINED') {
+            setGameState(event);
+          } else if (event.eventType === 'GAME_STARTED') {
+            setGameState(event);
+          } else if (event.eventType === 'WORD_SUBMITTED') {
+            setGameState(event);
+            setMessages(prev => [...prev, {
+              userId: event.currentTurnUserId, nickname: event.submitterNickname ?? '',
+              character: 'DOG', message: event.word ?? '', sentAt,
+              msgType: 'game-word',
+              gameData: { word: event.word, nextChar: event.nextChar, submitterNickname: event.submitterNickname },
+            }]);
+          } else if (event.eventType === 'GAME_OVER') {
+            setGameState(null);
+            setMessages(prev => [...prev, {
+              userId: '', nickname: '', character: 'DOG', message: '', sentAt,
+              msgType: 'game-over',
+              gameData: { winnerNickname: event.winnerNickname, loserNickname: event.loserNickname, reason: event.reason },
+            }]);
+          }
         });
 
         // chat
@@ -256,6 +297,33 @@ export function useRoom(config: RoomConfig | null): RoomState {
     });
   };
 
+  const startGame = (type: GameType) => {
+    const client = clientRef.current;
+    if (!client?.connected || !config || !charRef.current) return;
+    client.publish({
+      destination: `/app/room/${config.roomCode}/game/start`,
+      body: JSON.stringify({ userId: config.deviceId, nickname: config.nickname, gameType: type }),
+    });
+  };
+
+  const joinGame = (gameId: string) => {
+    const client = clientRef.current;
+    if (!client?.connected || !config) return;
+    client.publish({
+      destination: `/app/room/${config.roomCode}/game/join`,
+      body: JSON.stringify({ userId: config.deviceId, nickname: config.nickname, gameId }),
+    });
+  };
+
+  const submitWord = (word: string) => {
+    const client = clientRef.current;
+    if (!client?.connected || !config || !gameState) return;
+    client.publish({
+      destination: `/app/room/${config.roomCode}/game/word`,
+      body: JSON.stringify({ userId: config.deviceId, nickname: config.nickname, gameId: gameState.gameId, word }),
+    });
+  };
+
   const sendActivity = (activity: string) => {
     activityRef.current = activity;
     const client = clientRef.current;
@@ -272,5 +340,5 @@ export function useRoom(config: RoomConfig | null): RoomState {
 
   const clearCharacterError = () => setCharacterError(null);
 
-  return { users, messages, bubbleMessages, error, characterError, clearCharacterError, activityRef, takenCharacters, isConnected, sendChat, sendActivity, joinWithCharacter };
+  return { users, messages, bubbleMessages, error, characterError, clearCharacterError, activityRef, takenCharacters, isConnected, gameState, sendChat, sendActivity, joinWithCharacter, startGame, joinGame, submitWord };
 }
