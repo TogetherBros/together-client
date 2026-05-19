@@ -35,7 +35,7 @@ function App() {
   const screenRef = useRef(screen);
   screenRef.current = screen;
 
-  const { users, messages, bubbleMessages, error, characterError, clearCharacterError, activityRef, takenCharacters, isConnected, sendChat, sendActivity, joinWithCharacter } =
+  const { users, messages, bubbleMessages, error, characterError, clearCharacterError, activityRef, takenCharacters, isConnected, gameState, sendChat, sendActivity, joinWithCharacter, startGame, joinGame, submitWord } =
     useRoom(config);
 
   const usersRef = useRef<UserState[]>(users);
@@ -254,10 +254,14 @@ function App() {
           config={config}
           users={users}
           messages={messages}
+          gameState={gameState}
           onSendChat={sendChat}
           onSendActivity={sendActivity}
           onLeave={handleLeave}
           onBackToOverlay={handleBackToOverlay}
+          onStartGame={startGame}
+          onJoinGame={joinGame}
+          onSubmitWord={submitWord}
         />
       )}
     </div>

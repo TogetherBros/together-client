@@ -1,16 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { UserState, ChatMessage, RoomConfig } from '../types';
+import { UserState, ChatMessage, RoomConfig, GameState, GameType } from '../types';
 import { characterImages } from '../characters';
+import MiniGameSheet from './MiniGameSheet';
 
 interface Props {
   config: RoomConfig;
   users: UserState[];
   messages: ChatMessage[];
+  gameState: GameState | null;
   onSendChat: (text: string) => void;
   onSendActivity: (activity: string) => void;
   onLeave: () => void;
   onBackToOverlay: () => void;
+  onStartGame: (type: GameType) => void;
+  onJoinGame: (gameId: string) => void;
+  onSubmitWord: (word: string) => void;
 }
 
 function formatTime(iso: string): string {
@@ -37,20 +42,124 @@ function useElapsed(joinedAt: number) {
   return elapsed;
 }
 
+function useTurnTimer(deadline: string | undefined) {
+  const [remaining, setRemaining] = useState(0);
+  useEffect(() => {
+    if (!deadline) { setRemaining(0); return; }
+    const tick = () => setRemaining(Math.max(0, Math.ceil((new Date(deadline).getTime() - Date.now()) / 1000)));
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [deadline]);
+  return remaining;
+}
+
+function GameStatusBar({ gameState, myUserId, onJoin }: { gameState: GameState; myUserId: string; onJoin: (id: string) => void }) {
+  const remaining = useTurnTimer(gameState.status === 'playing' ? gameState.turnDeadline : undefined);
+  const isMyTurn = gameState.currentTurnUserId === myUserId;
+  const amParticipant = gameState.participants.includes(myUserId);
+
+  if (gameState.status === 'waiting') {
+    return (
+      <div className="game-status-bar game-status-waiting">
+        <span className="game-status-icon">🔤</span>
+        <span className="game-status-text">끝말잇기 대기 중… ({gameState.participants.length}명 참여)</span>
+        {!amParticipant && (
+          <button className="game-join-btn" onClick={() => onJoin(gameState.gameId)}>참여하기</button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`game-status-bar${isMyTurn ? ' game-status-myturn' : ''}`}>
+      <span className="game-status-icon">🔤</span>
+      <div className="game-status-info">
+        <span className="game-status-turn">
+          {isMyTurn ? '내 차례!' : `${gameState.currentTurnNickname} 차례`}
+        </span>
+        <span className="game-status-word">
+          <span className="game-next-char">「{gameState.nextChar}」</span>로 시작하는 단어
+        </span>
+      </div>
+      <span className={`game-timer${remaining <= 5 ? ' game-timer-urgent' : ''}`}>{remaining}초</span>
+    </div>
+  );
+}
+
+function GameInviteCard({ msg, myUserId, onJoin }: { msg: ChatMessage; myUserId: string; onJoin: (id: string) => void }) {
+  const gameId = msg.gameData?.gameId ?? '';
+  return (
+    <div className="game-invite-card">
+      <span className="game-invite-icon">🎮</span>
+      <div className="game-invite-body">
+        <span className="game-invite-title">끝말잇기 시작!</span>
+        <span className="game-invite-sub">{msg.nickname}님이 게임을 시작했어요</span>
+      </div>
+      {msg.userId !== myUserId && (
+        <button className="game-join-btn" onClick={() => onJoin(gameId)}>참여하기</button>
+      )}
+    </div>
+  );
+}
+
+function GameWordMsg({ msg }: { msg: ChatMessage }) {
+  return (
+    <div className="game-word-msg">
+      <span className="game-word-nick">{msg.gameData?.submitterNickname}</span>
+      <span className="game-word-text">{msg.gameData?.word}</span>
+      {msg.gameData?.nextChar && (
+        <span className="game-word-next">→ 「{msg.gameData.nextChar}」</span>
+      )}
+    </div>
+  );
+}
+
+function GameOverCard({ msg }: { msg: ChatMessage }) {
+  const reasonText: Record<string, string> = {
+    WRONG_WORD: '틀린 단어',
+    TIMEOUT: '시간 초과',
+    DUPLICATE: '중복 단어',
+    NO_WORD: '단어 없음',
+  };
+  const reason = msg.gameData?.reason ? reasonText[msg.gameData.reason] ?? '' : '';
+  return (
+    <div className="game-over-card">
+      <span className="game-over-icon">🏆</span>
+      <div className="game-over-body">
+        <span className="game-over-title">게임 종료</span>
+        {msg.gameData?.winnerNickname && (
+          <span className="game-over-winner">{msg.gameData.winnerNickname}님 우승!</span>
+        )}
+        {msg.gameData?.loserNickname && reason && (
+          <span className="game-over-reason">{msg.gameData.loserNickname} — {reason}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ChatScreen({
   config,
   users,
   messages,
+  gameState,
   onSendChat,
   onSendActivity,
   onLeave,
   onBackToOverlay,
+  onStartGame,
+  onJoinGame,
+  onSubmitWord,
 }: Props) {
   const [input, setInput] = useState('');
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [showGameSheet, setShowGameSheet] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const elapsed = useElapsed(config.joinedAt);
+
+  const isMyGameTurn = gameState?.status === 'playing' && gameState.currentTurnUserId === config.deviceId;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -66,12 +175,24 @@ export default function ChatScreen({
     const text = input.trim();
     if (!text) return;
     onSendActivity('');
-    onSendChat(text);
+    if (isMyGameTurn) {
+      onSubmitWord(text);
+    } else {
+      onSendChat(text);
+    }
     setInput('');
   };
 
+  const inputPlaceholder = isMyGameTurn
+    ? `「${gameState!.nextChar}」로 시작하는 단어를 입력하세요`
+    : '메시지를 입력하세요...';
+
   return (
     <div className="chat-screen">
+      {showGameSheet && (
+        <MiniGameSheet onSelect={onStartGame} onClose={() => setShowGameSheet(false)} />
+      )}
+
       <div className="chat-header" data-tauri-drag-region>
         <div className="chat-header-left">
           <div className="titlebar-buttons">
@@ -95,6 +216,12 @@ export default function ChatScreen({
         </div>
 
         <div className="chat-header-right">
+          <button
+            className="chat-game-btn"
+            onClick={() => setShowGameSheet(v => !v)}
+            title="미니게임"
+            aria-label="미니게임"
+          >🎮</button>
           {confirmLeave ? (
             <div className="chat-leave-confirm">
               <span className="chat-leave-confirm-text">나가시겠어요?</span>
@@ -123,11 +250,25 @@ export default function ChatScreen({
         </div>
       </div>
 
+      {gameState && (
+        <GameStatusBar gameState={gameState} myUserId={config.deviceId} onJoin={onJoinGame} />
+      )}
+
       <div className="chat-messages">
         {messages.length === 0 && (
           <p className="chat-empty">아직 메시지가 없어요. 먼저 인사해보세요!</p>
         )}
         {messages.map((msg, i) => {
+          if (msg.msgType === 'game-invite') {
+            return <GameInviteCard key={`gi-${i}`} msg={msg} myUserId={config.deviceId} onJoin={onJoinGame} />;
+          }
+          if (msg.msgType === 'game-word') {
+            return <GameWordMsg key={`gw-${i}`} msg={msg} />;
+          }
+          if (msg.msgType === 'game-over') {
+            return <GameOverCard key={`go-${i}`} msg={msg} />;
+          }
+
           const isMine = msg.userId === config.deviceId;
           return (
             <div
@@ -152,12 +293,12 @@ export default function ChatScreen({
         <div ref={bottomRef} />
       </div>
 
-      <div className="chat-input-row" onClick={() => inputRef.current?.focus()}>
+      <div className={`chat-input-row${isMyGameTurn ? ' chat-input-game' : ''}`} onClick={() => inputRef.current?.focus()}>
         <input
           ref={inputRef}
           className="chat-input"
           type="text"
-          placeholder="메시지를 입력하세요..."
+          placeholder={inputPlaceholder}
           maxLength={200}
           value={input}
           onChange={handleInputChange}
@@ -168,7 +309,7 @@ export default function ChatScreen({
           onClick={handleSend}
           disabled={!input.trim()}
         >
-          전송
+          {isMyGameTurn ? '제출' : '전송'}
         </button>
       </div>
     </div>
