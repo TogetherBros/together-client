@@ -234,6 +234,8 @@ export function useRoom(config: RoomConfig | null): RoomState {
           syncSub.unsubscribe();
           errorSub.unsubscribe();
           joinResolverRef.current = null;
+          hasJoinedRef.current = false;
+          charRef.current = null;
           resolve(null);
         }
       }, 5000);

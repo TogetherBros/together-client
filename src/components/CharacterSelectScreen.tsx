@@ -70,8 +70,11 @@ export default function CharacterSelectScreen({ roomCode, takenCharacters, chara
   const handleConfirm = async () => {
     if (!selected || confirming) return;
     setConfirming(true);
-    await onConfirm(selected);
-    setConfirming(false);
+    try {
+      await onConfirm(selected);
+    } finally {
+      setConfirming(false);
+    }
   };
 
   return (

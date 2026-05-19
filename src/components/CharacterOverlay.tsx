@@ -29,12 +29,9 @@ export default function CharacterOverlay() {
     const unlisteners: (() => void)[] = [];
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    console.log('[CharOverlay] useEffect 시작, label:', win.label);
-
-    // 1순위: initialization_script로 주입된 데이터 (\uXXXX 이스케이프 → 순수 ASCII)
+    // 1순위: initialization_script로 주입된 데이터
     const injected = (window as any).__TAURI_CHAR_USER__;
     if (injected && injected.userId) {
-      console.log('[CharOverlay] init-script 유저 발견:', injected.userId);
       userFoundRef.current = true;
       setUser(injected as UserState);
     }
@@ -46,30 +43,23 @@ export default function CharacterOverlay() {
         try {
           const me = JSON.parse(uParam) as UserState;
           if (me?.userId) {
-            console.log('[CharOverlay] URL 파라미터 유저 발견:', me.userId);
             userFoundRef.current = true;
             setUser(me);
           }
-        } catch (e) {
-          console.error('[CharOverlay] URL 파라미터 파싱 실패:', e);
-        }
+        } catch {}
       }
     }
 
     const fetchAndSetUser = async () => {
       try {
-        const winLabel = win.label;
-        const json = await invoke<string>('get_user_for_window', { label: winLabel });
-        console.log('[CharOverlay] get_user_for_window label:', winLabel, '| 결과:', json);
+        const json = await invoke<string>('get_user_for_window', { label: win.label });
         if (cancelled) return;
         if (json && json !== 'null') {
           const me = JSON.parse(json) as UserState;
           userFoundRef.current = true;
           setUser(me);
         }
-      } catch (e) {
-        console.error('[CharOverlay] get_user_for_window 실패:', e);
-      }
+      } catch {}
     };
 
     const setup = async () => {
@@ -135,18 +125,7 @@ export default function CharacterOverlay() {
     win.startDragging().catch(console.error);
   };
 
-  if (!user) {
-    return (
-      <div style={{
-        position: 'fixed', inset: 0,
-        background: 'rgba(255,0,0,0.5)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: 'white', fontSize: '12px', fontWeight: 'bold',
-        pointerEvents: 'none',
-        zIndex: 9999,
-      }}>NO DATA</div>
-    );
-  }
+  if (!user) return null;
 
   const scale = SIZE_SCALE[characterSize] ?? 1.0;
   const isTyping = !bubble && user.activity === '입력 중...';
