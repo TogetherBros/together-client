@@ -400,8 +400,11 @@ async fn sync_char_windows(
             .inner_size(win_w, win_h)
             .build() {
                 Ok(w) => {
-                    // OS 레벨 클릭 투과: 드래그 비활성 시 창이 클릭을 가로채지 않음
                     let _ = w.set_ignore_cursor_events(!drag_enabled);
+                    // 현재 사이즈 설정을 새 창에 즉시 전달 — 기본값(2)으로 시작하는 버그 방지
+                    if size_level != 2 {
+                        let _ = w.emit("character-size-changed", size_level);
+                    }
                     #[cfg(debug_assertions)]
                     let _ = w.open_devtools();
                 }
