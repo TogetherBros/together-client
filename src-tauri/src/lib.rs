@@ -453,8 +453,6 @@ fn get_users_json(state: tauri::State<'_, SharedState>) -> String {
 fn get_user_for_window(label: String, state: tauri::State<'_, SharedState>) -> String {
     let user_id = label.trim_start_matches("char_").to_string();
     let json = state.lock().unwrap().users_json.clone();
-    let preview: String = json.chars().take(200).collect();
-    eprintln!("[Together] get_user_for_window label={} userId={} json={}", label, user_id, preview);
     let users: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap_or_default();
     for user in users {
         if user.get("userId").and_then(|v| v.as_str()) == Some(user_id.as_str()) {
