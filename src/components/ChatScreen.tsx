@@ -131,7 +131,7 @@ export default function ChatScreen({
           const isMine = msg.userId === config.deviceId;
           return (
             <div
-              key={i}
+              key={`${msg.userId}-${msg.sentAt}-${i}`}
               className={`chat-msg ${isMine ? 'chat-msg-mine' : 'chat-msg-other'}`}
             >
               {!isMine && (
