@@ -108,7 +108,12 @@ function App() {
         usersJson,
       }).catch(console.error);
     } else {
-      invoke('store_users_json', { json: usersJson }).catch(console.error);
+      const positions = users.map((_u, i) => getWindowPosition(i, users.length));
+      invoke('sync_char_windows', {
+        userIds: users.map((u: UserState) => u.userId),
+        positions,
+        usersJson,
+      }).catch(console.error);
     }
 
     emit('users-updated', users).catch(console.error);
