@@ -293,6 +293,8 @@ fn leave_overlay(app: tauri::AppHandle, state: tauri::State<'_, SharedState>) ->
         s.tray_user_ids.clear();
         s.tray_user_labels.clear();
         s.hidden_users.clear();
+        s.character_size = 2;
+        s.users_json = "[]".to_string();
     }
     restore_window(&app);
     rebuild_tray(&app, &state);
@@ -363,8 +365,6 @@ async fn sync_char_windows(
         let drag_enabled = state.lock().unwrap().drag_enabled;
         let (win_w, win_h) = char_window_size(size_level);
 
-        eprintln!("[Together] sync_char_windows: user_ids={:?} users_json_len={} parsed_count={}", user_ids, users_json.len(), users_val.len());
-
         for (i, uid) in user_ids.iter().enumerate() {
             if existing_ids.contains(uid) { continue; }
             let label = format!("char_{}", uid);
@@ -373,13 +373,10 @@ async fn sync_char_windows(
             let pos = positions.get(i).copied().unwrap_or([100.0 + i as f64 * 240.0, 700.0]);
             let is_hidden = state.lock().unwrap().hidden_users.contains(uid.as_str());
 
-            // Find user data — passed as ?u= query param (percent-encoded JSON)
             let user_data = users_val.iter()
                 .find(|u| u.get("userId").and_then(|v| v.as_str()) == Some(uid.as_str()))
                 .map(|u| u.to_string())
                 .unwrap_or_else(|| "null".to_string());
-
-            eprintln!("[Together] char 창 생성: label={} user={}", label, &user_data[..user_data.len().min(80)]);
 
             let escaped = unicode_escape_json(&user_data);
             let init_script = format!("window.__TAURI_CHAR_USER__={};", escaped);
@@ -444,7 +441,6 @@ fn update_overlay_users(
 
 #[tauri::command]
 fn store_users_json(state: tauri::State<'_, SharedState>, json: String) {
-    eprintln!("[Together] store_users_json: {} chars", json.len());
     state.lock().unwrap().users_json = json;
 }
 
@@ -598,6 +594,8 @@ pub fn run() {
                                 s.tray_user_ids.clear();
                                 s.tray_user_labels.clear();
                                 s.hidden_users.clear();
+                                s.character_size = 2;
+                                s.users_json = "[]".to_string();
                             }
                             rebuild_tray(app, &state_for_tray);
                             restore_window(app);
