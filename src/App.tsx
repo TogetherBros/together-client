@@ -16,6 +16,34 @@ import CharacterSelectScreen from './components/CharacterSelectScreen';
 import ChatScreen from './components/ChatScreen';
 import './App.css';
 
+// ── 세션 복구 (F5 대응) ────────────────────────────────────────────────────────
+
+const SESSION_KEY = 'together_session';
+
+interface SavedSession {
+  config: RoomConfig;
+  character: Character;
+}
+
+function loadSession(): SavedSession | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as SavedSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(config: RoomConfig, character: Character) {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify({ config, character }));
+}
+
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
+}
+
+// ── DeviceId ──────────────────────────────────────────────────────────────────
+
 function getDeviceId(): string {
   const key = 'together_device_id';
   const stored = localStorage.getItem(key);
@@ -25,9 +53,16 @@ function getDeviceId(): string {
   return id;
 }
 
+// ── App ───────────────────────────────────────────────────────────────────────
+
 function App() {
-  const [screen, setScreen] = useState<AppScreen>('splash');
-  const [config, setConfig] = useState<RoomConfig | null>(null);
+  const restoredSession = useRef(loadSession()).current;
+
+  const [screen, setScreen] = useState<AppScreen>(restoredSession ? 'chat' : 'splash');
+  const [config, setConfig] = useState<RoomConfig | null>(restoredSession?.config ?? null);
+  const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(restoredSession?.character ?? null);
+  const [pendingRejoin, setPendingRejoin] = useState<Character | null>(restoredSession?.character ?? null);
+
   const [deviceId] = useState<string>(getDeviceId);
   const [updateInfo, setUpdateInfo] = useState<{ version: string } | null>(null);
   const [updateState, setUpdateState] = useState<'idle' | 'downloading' | 'done'>('idle');
@@ -35,7 +70,7 @@ function App() {
   const screenRef = useRef(screen);
   screenRef.current = screen;
 
-  const { users, messages, bubbleMessages, error, characterError, clearCharacterError, activityRef, takenCharacters, isConnected, gameState, sendChat, sendActivity, joinWithCharacter, startGame, joinGame, submitWord } =
+  const { users, messages, bubbleMessages, error, characterError, clearCharacterError, activityRef, takenCharacters, isConnected, sendChat, sendActivity, joinWithCharacter } =
     useRoom(config);
 
   const usersRef = useRef<UserState[]>(users);
@@ -43,6 +78,35 @@ function App() {
   usersRef.current = users;
   bubbleRef.current = bubbleMessages;
 
+  // ── 세션 복구: WS 연결되면 자동 재입장 ────────────────────────────────────
+  useEffect(() => {
+    if (!pendingRejoin || !isConnected) return;
+    const char = pendingRejoin;
+    setPendingRejoin(null);
+    joinWithCharacter(char).then((users) => {
+      if (!users) {
+        clearSession();
+        setSelectedCharacter(null);
+        setConfig(null);
+        setScreen('lobby');
+      }
+    });
+  }, [isConnected, pendingRejoin]);
+
+  useEffect(() => {
+    if (restoredSession) {
+      invoke('show_main_window').catch(console.error);
+    }
+  }, []);
+
+  // ── 세션 저장 ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if ((screen === 'chat' || screen === 'overlay') && config && selectedCharacter) {
+      saveSession(config, selectedCharacter);
+    }
+  }, [screen, config, selectedCharacter]);
+
+  // ── 알림 소리 ──────────────────────────────────────────────────────────────
   const playNotification = useNotificationSound();
   const msgCountRef = useRef(0);
   useEffect(() => {
@@ -53,36 +117,38 @@ function App() {
     msgCountRef.current = messages.length;
   }, [messages, playNotification, config]);
 
-  // 스플래시 타임아웃
+  // ── 스플래시 타임아웃 ─────────────────────────────────────────────────────
   useEffect(() => {
+    if (screen !== 'splash') return;
     const t = setTimeout(() => setScreen('lobby'), 1800);
     return () => clearTimeout(t);
   }, []);
 
-  // 업데이트 확인 (로비 진입 시 1회)
+  // ── 업데이트 확인 (로비 진입 시 1회) ─────────────────────────────────────
   const updateChecked = useRef(false);
   useEffect(() => {
-    if (screen !== 'lobby' || updateChecked.current) return;
+    if (screen !== 'lobby' || updateChecked.current || import.meta.env.DEV) return;
     updateChecked.current = true;
     check().then(update => {
       if (update?.available) setUpdateInfo({ version: update.version });
     }).catch(() => {});
   }, [screen]);
 
-  // 서버 에러 → 로비
+  // ── 서버 에러 → 로비 ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!error) return;
+    clearSession();
     setLobbyError(error);
     setConfig(null);
     setScreen('lobby');
     invoke('leave_overlay').catch(console.error);
   }, [error]);
 
-  // 앱 감지 (3초마다)
+  // ── 앱 감지 (3초마다) ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!config) return;
     const poll = async () => {
-      if (activityRef.current === '입력 중...') return; // 타이핑 중엔 덮어쓰지 않음
+      if (activityRef.current === '입력 중...') return;
       try {
         const app = await invoke<string>('get_active_app');
         activityRef.current = app;
@@ -93,28 +159,18 @@ function App() {
     return () => clearInterval(interval);
   }, [config, activityRef]);
 
-  // 캐릭터 창 동기화 + 유저 목록 브로드캐스트 + 트레이 동기화
+  // ── 캐릭터 창 동기화 ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!config || screen === 'splash' || screen === 'lobby' || screen === 'character-select') return;
     if (users.length === 0) return;
 
     const usersJson = JSON.stringify(users);
-    if (screen === 'overlay') {
-      const positions = users.map((_u, i) => getWindowPosition(i, users.length));
-      // usersJson을 직접 전달 — store_users_json 타이밍 의존성 제거
-      invoke('sync_char_windows', {
-        userIds: users.map((u: UserState) => u.userId),
-        positions,
-        usersJson,
-      }).catch(console.error);
-    } else {
-      const positions = users.map((_u, i) => getWindowPosition(i, users.length));
-      invoke('sync_char_windows', {
-        userIds: users.map((u: UserState) => u.userId),
-        positions,
-        usersJson,
-      }).catch(console.error);
-    }
+    const positions = users.map((_u, i) => getWindowPosition(i, users.length));
+    invoke('sync_char_windows', {
+      userIds: users.map((u: UserState) => u.userId),
+      positions,
+      usersJson,
+    }).catch(console.error);
 
     emit('users-updated', users).catch(console.error);
     invoke('update_overlay_users', {
@@ -123,13 +179,13 @@ function App() {
     }).catch(console.error);
   }, [users, config, screen]);
 
-  // 말풍선 브로드캐스트
+  // ── 말풍선 브로드캐스트 ───────────────────────────────────────────────────
   useEffect(() => {
     if (!config || screen === 'splash' || screen === 'lobby') return;
     emit('bubble-updated', bubbleMessages).catch(console.error);
   }, [bubbleMessages, config, screen]);
 
-  // 캐릭터 창 준비 완료 → 최신 상태 즉시 전송
+  // ── 캐릭터 창 준비 완료 → 최신 상태 즉시 전송 ───────────────────────────
   useEffect(() => {
     const unlisten = listen('char-ready', () => {
       const s = screenRef.current;
@@ -139,6 +195,35 @@ function App() {
     });
     return () => { unlisten.then(f => f()); };
   }, [deviceId]);
+
+  // ── 트레이 "열기" / 앱 재실행 / macOS 독 클릭 ───────────────────────────
+  useEffect(() => {
+    const unlisten = listen('open-chat', () => {
+      const s = screenRef.current;
+      flushSync(() => {
+        if (s === 'overlay' || s === 'chat') setScreen('chat');
+        else if (s === 'splash') setScreen('lobby');
+      });
+      invoke('show_main_window').catch(console.error);
+    });
+    return () => { unlisten.then(f => f()); };
+  }, []);
+
+  // ── 트레이 "방 나가기" ────────────────────────────────────────────────────
+  useEffect(() => {
+    const unlisten = listen('leave-overlay', () => {
+      clearSession();
+      flushSync(() => {
+        setConfig(null);
+        setSelectedCharacter(null);
+        setScreen('lobby');
+      });
+      invoke('show_main_window').catch(console.error);
+    });
+    return () => { unlisten.then(f => f()); };
+  }, []);
+
+  // ── 핸들러 ────────────────────────────────────────────────────────────────
 
   const handleUpdate = async () => {
     setUpdateState('downloading');
@@ -156,13 +241,14 @@ function App() {
   const handleJoin = (c: Omit<RoomConfig, 'deviceId' | 'joinedAt'>) => {
     setLobbyError(null);
     const full: RoomConfig = { ...c, deviceId, joinedAt: Date.now() };
-    setConfig(full); // WebSocket 연결 시작 (캐릭터 현황 확인용)
+    setConfig(full);
     setScreen('character-select');
   };
 
   const handleCharacterConfirm = async (character: Character) => {
     const newUsers = await joinWithCharacter(character);
     if (!newUsers) return;
+    setSelectedCharacter(character);
     const positions = newUsers.map((_u, i) => getWindowPosition(i, newUsers.length));
     const overlayAvailable = await invoke<boolean>('sync_char_windows', {
       userIds: newUsers.map((u: UserState) => u.userId),
@@ -179,6 +265,8 @@ function App() {
   };
 
   const handleLeave = async () => {
+    clearSession();
+    setSelectedCharacter(null);
     setConfig(null);
     setScreen('lobby');
     await invoke('leave_overlay').catch(console.error);
@@ -189,31 +277,7 @@ function App() {
     await invoke('enter_overlay').catch(console.error);
   };
 
-  // 트레이 "열기" / 앱 재실행 / macOS 독 클릭 → 상태에 맞는 화면으로
-  useEffect(() => {
-    const unlisten = listen('open-chat', () => {
-      const s = screenRef.current;
-      flushSync(() => {
-        // 방에 참여 중이면 채팅 화면, 아니면 현재 화면 유지
-        if (s === 'overlay' || s === 'chat') setScreen('chat');
-        else if (s === 'splash') setScreen('lobby');
-      });
-      invoke('show_main_window').catch(console.error);
-    });
-    return () => { unlisten.then(f => f()); };
-  }, []);
-
-  // 트레이 "방 나가기"
-  useEffect(() => {
-    const unlisten = listen('leave-overlay', () => {
-      flushSync(() => {
-        setConfig(null);
-        setScreen('lobby');
-      });
-      invoke('show_main_window').catch(console.error);
-    });
-    return () => { unlisten.then(f => f()); };
-  }, []);
+  // ── 렌더 ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="app">
@@ -254,14 +318,10 @@ function App() {
           config={config}
           users={users}
           messages={messages}
-          gameState={gameState}
           onSendChat={sendChat}
           onSendActivity={sendActivity}
           onLeave={handleLeave}
           onBackToOverlay={handleBackToOverlay}
-          onStartGame={startGame}
-          onJoinGame={joinGame}
-          onSubmitWord={submitWord}
         />
       )}
     </div>

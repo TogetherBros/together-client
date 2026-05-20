@@ -13,41 +13,7 @@ export interface ChatMessage {
   character: Character;
   message: string;
   sentAt: string;
-  msgType?: 'chat' | 'game-invite' | 'game-word' | 'game-over';
-  gameData?: {
-    gameId?: string;
-    word?: string;
-    nextChar?: string;
-    submitterNickname?: string;
-    winnerNickname?: string;
-    loserNickname?: string;
-    reason?: string;
-  };
-}
-
-export type GameType = 'WORD_CHAIN';
-export type GameStatus = 'waiting' | 'playing' | 'ended';
-
-export interface GameState {
-  gameId: string;
-  type: GameType;
-  status: GameStatus;
-  hostId: string;
-  hostNickname: string;
-  participants: string[];
-  currentTurnUserId: string;
-  currentTurnNickname: string;
-  nextChar: string;
-  turnDeadline: string;
-}
-
-export interface GameEvent extends GameState {
-  eventType: 'GAME_CREATED' | 'PLAYER_JOINED' | 'GAME_STARTED' | 'WORD_SUBMITTED' | 'GAME_OVER';
-  submitterNickname?: string;
-  word?: string;
-  winnerNickname?: string;
-  loserNickname?: string;
-  reason?: string;
+  msgType?: 'chat';
 }
 
 export interface ActivityRequest {
