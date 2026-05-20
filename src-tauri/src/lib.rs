@@ -401,10 +401,6 @@ async fn sync_char_windows(
             .build() {
                 Ok(w) => {
                     let _ = w.set_ignore_cursor_events(!drag_enabled);
-                    // 현재 사이즈 설정을 새 창에 즉시 전달 — 기본값(2)으로 시작하는 버그 방지
-                    if size_level != 2 {
-                        let _ = w.emit("character-size-changed", size_level);
-                    }
                     #[cfg(debug_assertions)]
                     let _ = w.open_devtools();
                 }
@@ -468,6 +464,10 @@ fn get_user_for_window(label: String, state: tauri::State<'_, SharedState>) -> S
 #[tauri::command]
 fn get_active_app() -> String { get_active_app_internal() }
 
+#[tauri::command]
+fn get_character_size(state: tauri::State<'_, SharedState>) -> u8 {
+    state.lock().unwrap().character_size
+}
 
 // ── App setup ─────────────────────────────────────────────────────────────────
 
@@ -663,6 +663,7 @@ pub fn run() {
             get_users_json,
             get_user_for_window,
             get_active_app,
+            get_character_size,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -101,6 +101,13 @@ export default function CharacterOverlay() {
 
       unlisteners.push(unsubUsers, unsubBubble, unsubSize, unsubDrag);
 
+      // 리스너 등록 완료 후 현재 사이즈를 직접 조회 — 창 생성 직후 emit이 리스너보다
+      // 먼저 도착하는 레이스 컨디션 방지
+      if (!cancelled) {
+        const size = await invoke<number>('get_character_size');
+        if (!cancelled) setCharacterSize(size);
+      }
+
       // All listeners registered — now signal main window to send initial state
       if (!cancelled) {
         await emit('char-ready', { userId: userIdRef.current });
