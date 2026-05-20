@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Together",
-  "version": "1.0.17",
+  "version": "1.1.0",
   "identifier": "com.n5rud.together-fe",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -17,13 +17,13 @@
         "width": 460,
         "height": 660,
         "decorations": false,
-        "transparent": true,
+        "transparent": false,
         "center": true,
         "devtools": true
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src ipc: http://ipc.localhost https://ipc.localhost wss://api.togetherbros.uk https://api.togetherbros.uk http://tauri.localhost; img-src 'self' asset: https://asset.localhost http://asset.localhost data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:;"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src ipc: http://ipc.localhost https://ipc.localhost wss://api.togetherbros.uk https://api.togetherbros.uk ws://localhost:9090 http://localhost:9090 http://tauri.localhost; img-src 'self' asset: https://asset.localhost http://asset.localhost data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:;"
     },
     "macOSPrivateApi": true
   },

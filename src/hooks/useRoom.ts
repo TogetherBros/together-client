@@ -52,7 +52,6 @@ export function useRoom(config: RoomConfig | null): RoomState {
     }
 
     setIsConnected(false);
-
     charRef.current = null;
     hasJoinedRef.current = false;
 
@@ -72,7 +71,7 @@ export function useRoom(config: RoomConfig | null): RoomState {
     };
 
     const client = new Client({
-      brokerURL: 'wss://api.togetherbros.uk/ws',
+      brokerURL: import.meta.env.VITE_WS_URL as string,
       reconnectDelay: 3000,
       heartbeatIncoming: 10000,
       heartbeatOutgoing: 10000,
@@ -89,7 +88,6 @@ export function useRoom(config: RoomConfig | null): RoomState {
         if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
         setIsConnected(true);
 
-        // delta: 신규 유저 입장
         client.subscribe(`/topic/room/${roomCode}/join`, (msg) => {
           const newUser: UserState = JSON.parse(msg.body);
           setUsers(prev =>
@@ -97,7 +95,6 @@ export function useRoom(config: RoomConfig | null): RoomState {
           );
         });
 
-        // delta: 유저 퇴장
         client.subscribe(`/topic/room/${roomCode}/leave`, (msg) => {
           const { userId } = JSON.parse(msg.body) as { userId: string };
           setUsers(prev => prev.filter(u => u.userId !== userId));
@@ -107,13 +104,11 @@ export function useRoom(config: RoomConfig | null): RoomState {
           });
         });
 
-        // delta: activity
         client.subscribe(`/topic/room/${roomCode}/activity`, (msg) => {
           const { userId, activity } = JSON.parse(msg.body) as { userId: string; activity: string };
           setUsers(prev => prev.map(u => u.userId === userId ? { ...u, activity } : u));
         });
 
-        // chat
         client.subscribe(`/topic/room/${roomCode}/chat`, (msg) => {
           const chatMsg: ChatMessage = JSON.parse(msg.body);
           const localMsg: ChatMessage = { ...chatMsg, sentAt: new Date().toISOString() };
@@ -127,7 +122,6 @@ export function useRoom(config: RoomConfig | null): RoomState {
           }, 3500);
         });
 
-        // 재연결 시 재입장
         if (hasJoinedRef.current && charRef.current) {
           const syncId = crypto.randomUUID();
           const syncSub = client.subscribe(`/topic/join-sync/${syncId}`, (msg) => {

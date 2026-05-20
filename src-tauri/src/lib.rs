@@ -468,6 +468,7 @@ fn get_user_for_window(label: String, state: tauri::State<'_, SharedState>) -> S
 #[tauri::command]
 fn get_active_app() -> String { get_active_app_internal() }
 
+
 // ── App setup ─────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

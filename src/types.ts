@@ -13,6 +13,7 @@ export interface ChatMessage {
   character: Character;
   message: string;
   sentAt: string;
+  msgType?: 'chat';
 }
 
 export interface ActivityRequest {

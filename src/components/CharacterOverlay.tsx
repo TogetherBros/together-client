@@ -7,6 +7,16 @@ import { characterImages } from '../characters';
 
 const SIZE_SCALE: Record<number, number> = { 1: 0.7, 2: 1.0, 3: 1.35 };
 
+const SUFFIX = ' 실행 중';
+const MAX_APP_NAME = 8;
+
+function formatActivity(activity: string): string {
+  if (!activity.endsWith(SUFFIX)) return activity;
+  const appName = activity.slice(0, -SUFFIX.length);
+  if (appName.length <= MAX_APP_NAME) return activity;
+  return appName.slice(0, MAX_APP_NAME) + '...' + SUFFIX;
+}
+
 export default function CharacterOverlay() {
   const win = getCurrentWindow();
   // initialization_script로 주입된 유저 데이터에서 userId 우선 사용
@@ -129,7 +139,7 @@ export default function CharacterOverlay() {
 
   const scale = SIZE_SCALE[characterSize] ?? 1.0;
   const isTyping = !bubble && user.activity === '입력 중...';
-  const displayText = bubble || user.activity;
+  const displayText = bubble || formatActivity(user.activity);
   const showBubble = !!bubble || user.activity !== '';
 
   return (
