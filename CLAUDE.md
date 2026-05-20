@@ -101,3 +101,6 @@ splash → lobby → character-select → overlay (캐릭터 창 활성)
 
 - `overlay` ↔ `chat` 은 서로 전환 가능
 - 방 나가기 → `lobby`로 복귀
+
+
+https://coolors.co/b7b3a1-d1ca98-edbf85-f7f06d-ffb140

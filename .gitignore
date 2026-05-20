@@ -30,3 +30,10 @@ dist-ssr
 
 # Local Cargo config (contains machine-specific paths)
 .cargo/
+
+# 환경별 URL 설정 (팀원마다 다를 수 있음)
+.env.development
+.env.production
+
+# Claude 세션 로그
+docs/last_session_*.md
